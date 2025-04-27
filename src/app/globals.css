@@ -1,0 +1,37 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --foreground-rgb: 255, 255, 255;
+  --background-start-rgb: 26, 31, 34;
+  --background-end-rgb: 26, 31, 34;
+  --accent-rgb: 46, 203, 112;
+}
+
+body {
+  color: rgb(var(--foreground-rgb));
+  background: rgb(var(--background-start-rgb));
+}
+
+@layer components {
+  .btn-primary {
+    @apply bg-accent text-white font-bold uppercase py-3 px-8 rounded-full w-full;
+  }
+  
+  .btn-secondary {
+    @apply bg-card border border-text-light text-white font-bold uppercase py-3 px-8 rounded-full w-full;
+  }
+  
+  .card {
+    @apply bg-card rounded-xl p-4;
+  }
+  
+  .input-field {
+    @apply bg-card text-white rounded-xl p-3 w-full;
+  }
+  
+  .nav-header {
+    @apply fixed top-0 w-full bg-background py-4 px-4 flex items-center justify-between z-10;
+  }
+} 
