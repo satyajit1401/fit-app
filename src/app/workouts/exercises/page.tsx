@@ -1,54 +1,132 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Layout from '@/components/layout/Layout';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { supabase } from '@/lib/supabase';
+import { clearCache, CACHE_KEYS } from '@/lib/cache';
 
-// Mock data for exercises
-const exercisesList = [
-  { id: 1, name: 'Arnold Press - Seated - Dumbbell', equipment: 'Dumbbell', group: 'A' },
-  { id: 2, name: 'Around the World - Dumbbell', equipment: 'Dumbbell', group: 'A' },
-  { id: 3, name: 'Assault Bike', equipment: 'Machine', group: 'A' },
-  { id: 4, name: 'Back Extensions', equipment: 'Machine', group: 'B' },
-  { id: 5, name: 'Back Squat - Barbell', equipment: 'Barbell', group: 'B' },
-  { id: 6, name: 'Back Squat - Concentric - Barbell', equipment: 'Barbell', group: 'B' },
-  { id: 7, name: 'Bench Press - Dumbbell', equipment: 'Dumbbell', group: 'C' },
-];
+interface Exercise {
+  id: string;
+  name: string;
+  equipment?: string;
+  category: string;
+  description?: string;
+}
 
 export default function ExercisesPage() {
   const router = useRouter();
-  const [searchQuery, setSearchQuery] = useState('');
+  const searchParams = useSearchParams();
+  const workoutId = searchParams.get('workoutId');
   
-  const filteredExercises = exercisesList.filter(exercise => 
+  const [searchQuery, setSearchQuery] = useState('');
+  const [exercises, setExercises] = useState<Exercise[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [selectedExercises, setSelectedExercises] = useState<string[]>([]);
+  
+  useEffect(() => {
+    const fetchExercises = async () => {
+      setLoading(true);
+      try {
+        const { data, error } = await supabase
+          .from('exercises')
+          .select('*')
+          .order('name');
+          
+        if (error) throw error;
+        setExercises(data || []);
+      } catch (error) {
+        console.error('Error fetching exercises:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+    
+    fetchExercises();
+  }, []);
+  
+  const filteredExercises = exercises.filter(exercise => 
     exercise.name.toLowerCase().includes(searchQuery.toLowerCase())
   );
   
-  // Group exercises by first letter for alphabetical listing
-  const groupedExercises: Record<string, typeof exercisesList> = {};
+  // Group exercises by category
+  const groupedExercises: Record<string, Exercise[]> = {};
   
   filteredExercises.forEach(exercise => {
-    if (!groupedExercises[exercise.group]) {
-      groupedExercises[exercise.group] = [];
+    const category = exercise.category || 'Other';
+    if (!groupedExercises[category]) {
+      groupedExercises[category] = [];
     }
-    groupedExercises[exercise.group].push(exercise);
+    groupedExercises[category].push(exercise);
   });
 
-  const handleAddExercise = (exerciseId: number) => {
-    // In a real app, would add this exercise to the workout
-    // For now, just navigate back to the workout page
-    router.back();
+  const handleToggleSelect = (exerciseId: string) => {
+    if (selectedExercises.includes(exerciseId)) {
+      setSelectedExercises(selectedExercises.filter(id => id !== exerciseId));
+    } else {
+      setSelectedExercises([...selectedExercises, exerciseId]);
+    }
+  };
+  
+  const handleAddExercises = async () => {
+    if (!workoutId || selectedExercises.length === 0) return;
+    
+    try {
+      // Get the highest position value for the current workout
+      const { data: positionData } = await supabase
+        .from('workout_exercises')
+        .select('position')
+        .eq('workout_id', workoutId)
+        .order('position', { ascending: false })
+        .limit(1);
+      
+      const highestPosition = positionData?.[0]?.position || 0;
+      
+      // Prepare data for insertion
+      const exercisesToInsert = selectedExercises.map((exerciseId, index) => ({
+        workout_id: workoutId,
+        exercise_id: exerciseId,
+        position: highestPosition + index + 1,
+        sets: 3,
+        reps: 10
+      }));
+      
+      // Insert the exercises
+      const { error } = await supabase
+        .from('workout_exercises')
+        .insert(exercisesToInsert);
+      
+      if (error) throw error;
+      
+      // Clear cache
+      clearCache(`${CACHE_KEYS.WORKOUT_EXERCISES}${workoutId}`);
+      
+      // Navigate back to the workout page
+      router.push(`/workouts/${workoutId}`);
+    } catch (error) {
+      console.error('Error adding exercises:', error);
+    }
+  };
+  
+  const handleGoToCustomExercise = () => {
+    router.push(`/workouts/custom-exercise?workoutId=${workoutId}`);
   };
   
   const bottomActions = (
-    <div className="fixed bottom-0 left-0 w-full p-4 grid grid-cols-2 gap-4 bg-background">
-      <button className="btn-secondary">SUPERSET</button>
-      <button className="btn-primary">ADD</button>
+    <div className="fixed bottom-0 left-0 w-full p-4 bg-background">
+      <button 
+        className="btn-primary w-full"
+        onClick={handleAddExercises}
+        disabled={selectedExercises.length === 0}
+      >
+        ADD {selectedExercises.length > 0 ? `(${selectedExercises.length})` : ''}
+      </button>
     </div>
   );
   
   return (
-    <Layout title="SELECT EXERCISES" backUrl="/workouts" bottomElement={bottomActions}>
+    <Layout title="SELECT EXERCISES" backUrl={`/workouts/${workoutId}`} bottomElement={bottomActions}>
       <div className="mb-6">
         <div className="relative">
           <div className="absolute inset-y-0 left-3 flex items-center pointer-events-none">
@@ -58,7 +136,7 @@ export default function ExercisesPage() {
           </div>
           <input
             type="text"
-            className="block w-full pl-10 pr-3 py-3 bg-card rounded-xl border-none text-white"
+            className="block w-full pl-10 pr-3 py-3 bg-card-bg rounded-xl border-none text-white"
             placeholder="Search for an exercise..."
             onChange={(e) => setSearchQuery(e.target.value)}
             value={searchQuery}
@@ -67,7 +145,10 @@ export default function ExercisesPage() {
       </div>
       
       <div className="mb-4 card border border-dashed border-text-light">
-        <button className="w-full flex items-center p-2">
+        <button 
+          className="w-full flex items-center p-4"
+          onClick={handleGoToCustomExercise}
+        >
           <div className="w-12 h-12 bg-gray-600 rounded-md flex items-center justify-center mr-4">
             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-6 h-6">
               <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
@@ -77,38 +158,44 @@ export default function ExercisesPage() {
         </button>
       </div>
       
-      <div className="space-y-4 mb-32">
-        {Object.keys(groupedExercises).sort().map(group => (
-          <div key={group}>
-            <h2 className="text-xl font-bold mb-2">{group}</h2>
-            <div className="space-y-2">
-              {groupedExercises[group].map(exercise => (
-                <div 
-                  key={exercise.id}
-                  className="card flex items-center justify-between p-4"
-                  onClick={() => handleAddExercise(exercise.id)}
-                >
-                  <div className="flex items-center">
-                    <div className="w-12 h-12 bg-gray-600 rounded-md flex items-center justify-center mr-4">
-                      {exercise.equipment === 'Dumbbell' ? (
-                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6">
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M6.633 10.25c.806 0 1.533-.446 2.031-1.08a9.041 9.041 0 0 1 2.861-2.4c.723-.384 1.35-.956 1.653-1.715a4.498 4.498 0 0 0 .322-1.672V2.75a.75.75 0 0 1 .75-.75 2.25 2.25 0 0 1 2.25 2.25c0 1.152-.26 2.243-.723 3.218-.266.558.107 1.282.725 1.282m0 0h3.126c1.026 0 1.945.694 2.054 1.715.045.422.068.85.068 1.285a11.95 11.95 0 0 1-2.649 7.521c-.388.482-.987.729-1.605.729H13.48c-.483 0-.964-.078-1.423-.23l-3.114-1.04a4.501 4.501 0 0 0-1.423-.23H5.904m10.598-9.75H14.25M5.904 18.5c.083.205.173.405.27.602.197.4-.078.898-.523.898h-.908c-.889 0-1.713-.518-1.972-1.368a12 12 0 0 1-.521-3.507c0-1.553.295-3.036.831-4.398C3.387 9.953 4.167 9.5 5 9.5h1.053c.472 0 .745.556.5.96a8.958 8.958 0 0 0-1.302 4.665c0 1.194.232 2.333.654 3.375Z" />
-                        </svg>
-                      ) : (
-                        <span>W</span>
-                      )}
-                    </div>
-                    <span>{exercise.name}</span>
-                  </div>
-                  <button className="w-8 h-8 rounded-full bg-card flex items-center justify-center text-text-light border border-text-light">
-                    i
-                  </button>
-                </div>
-              ))}
-            </div>
+      {loading ? (
+        <div className="text-center py-10">
+          <div className="inline-block h-8 w-8 animate-spin rounded-full border-4 border-solid border-current border-r-transparent align-[-0.125em] motion-reduce:animate-[spin_1.5s_linear_infinite]" role="status">
+            <span className="!absolute !-m-px !h-px !w-px !overflow-hidden !whitespace-nowrap !border-0 !p-0 ![clip:rect(0,0,0,0)]">Loading...</span>
           </div>
-        ))}
-      </div>
+        </div>
+      ) : (
+        <div className="space-y-4 mb-32">
+          {Object.keys(groupedExercises).sort().map(category => (
+            <div key={category}>
+              <h2 className="text-xl font-bold mb-2">{category}</h2>
+              <div className="space-y-2">
+                {groupedExercises[category].map(exercise => (
+                  <div 
+                    key={exercise.id}
+                    className={`card flex items-center justify-between p-4 ${selectedExercises.includes(exercise.id) ? 'border-2 border-accent' : ''}`}
+                    onClick={() => handleToggleSelect(exercise.id)}
+                  >
+                    <div className="flex items-center">
+                      <div className="w-12 h-12 bg-gray-600 rounded-md flex items-center justify-center mr-4">
+                        {exercise.name.substring(0, 1)}
+                      </div>
+                      <span>{exercise.name}</span>
+                    </div>
+                    {selectedExercises.includes(exercise.id) && (
+                      <div className="w-8 h-8 rounded-full bg-accent flex items-center justify-center text-white">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-5 h-5">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                        </svg>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </Layout>
   );
 } 

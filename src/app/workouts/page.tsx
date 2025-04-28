@@ -1,18 +1,28 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Layout from '@/components/layout/Layout';
 import Link from 'next/link';
+import { getWorkouts, Workout } from '@/lib/api';
+import { useAuth } from '@/lib/auth-context';
 
 export default function WorkoutsPage() {
-  const [activeTab, setActiveTab] = useState('my');
+  const [workouts, setWorkouts] = useState<Workout[]>([]);
+  const [loading, setLoading] = useState(true);
+  const { user } = useAuth();
   
-  // Mock data for workouts
-  const myWorkouts = [
-    { id: 1, name: 'CHEST DAY' },
-    { id: 2, name: 'LEG DAY' },
-    { id: 3, name: 'BACK & BICEPS' },
-  ];
+  useEffect(() => {
+    const fetchWorkouts = async () => {
+      setLoading(true);
+      const data = await getWorkouts();
+      setWorkouts(data);
+      setLoading(false);
+    };
+    
+    if (user) {
+      fetchWorkouts();
+    }
+  }, [user]);
   
   const rightElement = (
     <Link href="/workouts/create">
@@ -26,27 +36,22 @@ export default function WorkoutsPage() {
     <Layout title="STRENGTH TRAINER" rightElement={rightElement}>
       <div className="mb-6">
         <div className="flex border-b border-gray-700">
-          <button
-            className={`flex-1 pb-2 text-center ${
-              activeTab === 'whoop' ? 'text-accent border-b-2 border-accent font-medium' : 'text-text-light'
-            }`}
-            onClick={() => setActiveTab('whoop')}
-          >
-            WHOOP WORKOUTS
-          </button>
-          <button
-            className={`flex-1 pb-2 text-center ${
-              activeTab === 'my' ? 'text-accent border-b-2 border-accent font-medium' : 'text-text-light'
-            }`}
-            onClick={() => setActiveTab('my')}
-          >
+          <div className="flex-1 pb-2 text-center text-accent border-b-2 border-accent font-medium">
             MY WORKOUTS
-          </button>
+          </div>
         </div>
       </div>
       
       <div className="space-y-4">
-        {activeTab === 'my' && myWorkouts.map(workout => (
+        {loading && (
+          <div className="text-center py-10">
+            <div className="inline-block h-8 w-8 animate-spin rounded-full border-4 border-solid border-current border-r-transparent align-[-0.125em] motion-reduce:animate-[spin_1.5s_linear_infinite]" role="status">
+              <span className="!absolute !-m-px !h-px !w-px !overflow-hidden !whitespace-nowrap !border-0 !p-0 ![clip:rect(0,0,0,0)]">Loading...</span>
+            </div>
+          </div>
+        )}
+        
+        {!loading && workouts.length > 0 && workouts.map(workout => (
           <Link href={`/workouts/${workout.id}`} key={workout.id}>
             <div className="card flex items-center justify-between p-6">
               <span className="font-medium">{workout.name}</span>
@@ -55,15 +60,15 @@ export default function WorkoutsPage() {
           </Link>
         ))}
         
-        {activeTab === 'whoop' && (
+        {!loading && workouts.length === 0 && (
           <div className="text-center text-text-light py-10">
-            No WHOOP workouts available
+            No workouts found. Create your first workout!
           </div>
         )}
       </div>
       
       <div className="mt-6">
-        <Link href="/workouts/quick-start">
+        <Link href="/workouts/create">
           <button className="btn-primary">CREATE NEW WORKOUT</button>
         </Link>
       </div>

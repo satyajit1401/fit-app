@@ -1,157 +1,182 @@
 'use client';
 
 import { useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import Layout from '@/components/layout/Layout';
+import { supabase } from '@/lib/supabase';
+import { clearCache, CACHE_KEYS } from '@/lib/cache';
 
 export default function CustomExercisePage() {
   const router = useRouter();
-  const [formData, setFormData] = useState({
-    name: '',
-    description: '',
-    trackMuscularLoad: false,
-    linkedExercise: '',
-    equipment: '',
-    muscleGroup: ''
-  });
+  const searchParams = useSearchParams();
+  const workoutId = searchParams.get('workoutId');
   
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
-    const { name, value, type } = e.target;
-    const newValue = type === 'checkbox' ? (e.target as HTMLInputElement).checked : value;
-    
-    setFormData(prev => ({
-      ...prev,
-      [name]: newValue
-    }));
-  };
+  const [name, setName] = useState('');
+  const [category, setCategory] = useState('Strength');
+  const [equipment, setEquipment] = useState('');
+  const [description, setDescription] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState('');
   
-  const handleSubmit = (e: React.FormEvent) => {
+  const categories = [
+    'Strength', 
+    'Cardio', 
+    'Flexibility', 
+    'Balance', 
+    'Core', 
+    'Upper Body', 
+    'Lower Body', 
+    'Full Body'
+  ];
+  
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    // In a real app, save the exercise to the database
-    router.back();
+    
+    if (!name.trim()) {
+      setError('Please enter an exercise name');
+      return;
+    }
+    
+    setIsLoading(true);
+    setError('');
+    
+    try {
+      // Create the custom exercise
+      const { data: exerciseData, error: exerciseError } = await supabase
+        .from('exercises')
+        .insert([
+          {
+            name: name.trim(),
+            category,
+            equipment: equipment.trim() || null,
+            description: description.trim() || null,
+            is_custom: true
+          }
+        ])
+        .select()
+        .single();
+      
+      if (exerciseError) throw exerciseError;
+      
+      // If a workout ID was provided, add this exercise to the workout
+      if (workoutId) {
+        // Get the highest position in the workout
+        const { data: positionData } = await supabase
+          .from('workout_exercises')
+          .select('position')
+          .eq('workout_id', workoutId)
+          .order('position', { ascending: false })
+          .limit(1);
+        
+        const position = (positionData?.[0]?.position || 0) + 1;
+        
+        // Add the exercise to the workout
+        const { error: workoutExerciseError } = await supabase
+          .from('workout_exercises')
+          .insert([
+            {
+              workout_id: workoutId,
+              exercise_id: exerciseData.id,
+              position,
+              sets: 3,
+              reps: 10
+            }
+          ]);
+          
+        if (workoutExerciseError) throw workoutExerciseError;
+        
+        // Clear the workout exercises cache
+        clearCache(`${CACHE_KEYS.WORKOUT_EXERCISES}${workoutId}`);
+      }
+      
+      // Navigate back to the workout or exercises page
+      if (workoutId) {
+        router.push(`/workouts/${workoutId}`);
+      } else {
+        router.push('/workouts/exercises');
+      }
+    } catch (err) {
+      console.error('Error creating exercise:', err);
+      setError('Failed to create exercise. Please try again.');
+      setIsLoading(false);
+    }
   };
-  
-  const infoIcon = (
-    <button className="w-8 h-8 rounded-full bg-background flex items-center justify-center border border-text-light">
-      <span className="text-text-light">i</span>
-    </button>
-  );
   
   return (
-    <Layout title="CUSTOM EXERCISE" backUrl="/workouts/exercises">
-      <form onSubmit={handleSubmit}>
-        <div className="space-y-6 mb-24">
-          <div className="space-y-4">
-            <div>
-              <label htmlFor="name" className="block text-text-light mb-1">EXERCISE NAME</label>
-              <input
-                type="text"
-                id="name"
-                name="name"
-                value={formData.name}
-                onChange={handleChange}
-                placeholder="Name your custom exercise"
-                className="input-field"
-                required
-              />
-            </div>
-            
-            <div>
-              <label htmlFor="description" className="block text-text-light mb-1">DESCRIPTION</label>
-              <textarea
-                id="description"
-                name="description"
-                value={formData.description}
-                onChange={handleChange}
-                placeholder="Write a brief description of your custom exercise here."
-                className="input-field h-32 resize-none"
-              />
-            </div>
+    <Layout title="CREATE CUSTOM EXERCISE" backUrl={workoutId ? `/workouts/exercises?workoutId=${workoutId}` : '/workouts/exercises'}>
+      <form onSubmit={handleSubmit} className="flex flex-col h-full">
+        <div className="flex-1 space-y-6">
+          <div>
+            <label className="block text-text-light mb-2" htmlFor="exercise-name">
+              EXERCISE NAME
+            </label>
+            <input
+              id="exercise-name"
+              type="text"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="e.g., Single-Arm Push-Up"
+              className="w-full bg-card-bg text-white border border-gray-700 rounded-md p-4 focus:outline-none focus:ring-2 focus:ring-accent"
+              autoFocus
+            />
           </div>
           
-          <div className="card p-4">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-xl font-bold">Track Muscular Load</h2>
-              {infoIcon}
-            </div>
-            
-            <p className="text-text-light mb-6">
-              In order to provide accurate Muscular Load, you can link your
-              custom exercise to a similar existing exercise.
-            </p>
-            
-            <button 
-              type="button" 
-              className="w-full p-4 bg-card border border-text-light rounded-xl flex justify-between items-center"
-              onClick={() => router.push('/workouts/custom-exercise/link')}
+          <div>
+            <label className="block text-text-light mb-2" htmlFor="exercise-category">
+              CATEGORY
+            </label>
+            <select
+              id="exercise-category"
+              value={category}
+              onChange={(e) => setCategory(e.target.value)}
+              className="w-full bg-card-bg text-white border border-gray-700 rounded-md p-4 focus:outline-none focus:ring-2 focus:ring-accent"
             >
-              <span>LINK AN EXERCISE</span>
-              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-5 h-5">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
-              </svg>
-            </button>
+              {categories.map(cat => (
+                <option key={cat} value={cat}>{cat}</option>
+              ))}
+            </select>
           </div>
           
-          <div className="space-y-4">
-            <div>
-              <label htmlFor="equipment" className="block text-text-light mb-1">EQUIPMENT</label>
-              <div className="relative">
-                <select
-                  id="equipment"
-                  name="equipment"
-                  value={formData.equipment}
-                  onChange={handleChange}
-                  className="input-field appearance-none pr-10"
-                  required
-                >
-                  <option value="" disabled>SELECT EQUIPMENT</option>
-                  <option value="barbell">Barbell</option>
-                  <option value="dumbbell">Dumbbell</option>
-                  <option value="machine">Machine</option>
-                  <option value="bodyweight">Bodyweight</option>
-                  <option value="cable">Cable</option>
-                  <option value="kettlebell">Kettlebell</option>
-                </select>
-                <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none">
-                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-5 h-5 text-text-light">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
-                  </svg>
-                </div>
-              </div>
-            </div>
-            
-            <div>
-              <label htmlFor="muscleGroup" className="block text-text-light mb-1">MUSCLE GROUP</label>
-              <div className="relative">
-                <select
-                  id="muscleGroup"
-                  name="muscleGroup"
-                  value={formData.muscleGroup}
-                  onChange={handleChange}
-                  className="input-field appearance-none pr-10"
-                  required
-                >
-                  <option value="" disabled>SELECT MUSCLE GROUP</option>
-                  <option value="chest">Chest</option>
-                  <option value="back">Back</option>
-                  <option value="legs">Legs</option>
-                  <option value="shoulders">Shoulders</option>
-                  <option value="arms">Arms</option>
-                  <option value="core">Core</option>
-                  <option value="cardio">Cardio</option>
-                </select>
-                <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none">
-                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-5 h-5 text-text-light">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
-                  </svg>
-                </div>
-              </div>
-            </div>
+          <div>
+            <label className="block text-text-light mb-2" htmlFor="exercise-equipment">
+              EQUIPMENT (OPTIONAL)
+            </label>
+            <input
+              id="exercise-equipment"
+              type="text"
+              value={equipment}
+              onChange={(e) => setEquipment(e.target.value)}
+              placeholder="e.g., Dumbbell, Barbell, Bodyweight"
+              className="w-full bg-card-bg text-white border border-gray-700 rounded-md p-4 focus:outline-none focus:ring-2 focus:ring-accent"
+            />
           </div>
+          
+          <div>
+            <label className="block text-text-light mb-2" htmlFor="exercise-description">
+              DESCRIPTION (OPTIONAL)
+            </label>
+            <textarea
+              id="exercise-description"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="Describe how to perform this exercise..."
+              className="w-full bg-card-bg text-white border border-gray-700 rounded-md p-4 h-32 resize-none focus:outline-none focus:ring-2 focus:ring-accent"
+            />
+          </div>
+          
+          {error && (
+            <p className="text-red-500">{error}</p>
+          )}
         </div>
         
-        <div className="fixed bottom-20 left-0 w-full p-4">
-          <button type="submit" className="btn-primary">SAVE TO LIBRARY</button>
+        <div className="mt-6">
+          <button
+            type="submit"
+            className="btn-primary w-full"
+            disabled={isLoading}
+          >
+            {isLoading ? 'CREATING...' : 'CREATE EXERCISE'}
+          </button>
         </div>
       </form>
     </Layout>
