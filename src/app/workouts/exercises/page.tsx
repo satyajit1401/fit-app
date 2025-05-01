@@ -116,7 +116,7 @@ export default function ExercisesPage() {
   const bottomActions = (
     <div className="fixed bottom-0 left-0 w-full p-4 bg-background">
       <button 
-        className="btn-primary w-full"
+        className="btn-primary w-full py-3 rounded-full text-base"
         onClick={handleAddExercises}
         disabled={selectedExercises.length === 0}
       >
@@ -127,7 +127,7 @@ export default function ExercisesPage() {
   
   return (
     <Layout title="SELECT EXERCISES" backUrl={`/workouts/${workoutId}`} bottomElement={bottomActions}>
-      <div className="mb-6">
+      <div className="mb-4">
         <div className="relative">
           <div className="absolute inset-y-0 left-3 flex items-center pointer-events-none">
             <svg className="w-5 h-5 text-text-light" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -136,28 +136,26 @@ export default function ExercisesPage() {
           </div>
           <input
             type="text"
-            className="block w-full pl-10 pr-3 py-3 bg-card-bg rounded-xl border-none text-white"
+            className="block w-full pl-10 pr-3 py-2 bg-card-bg rounded-xl border-none text-white text-base"
             placeholder="Search for an exercise..."
             onChange={(e) => setSearchQuery(e.target.value)}
             value={searchQuery}
           />
         </div>
       </div>
-      
-      <div className="mb-4 card border border-dashed border-text-light">
+      <div className="mb-3 card border border-dashed border-text-light">
         <button 
-          className="w-full flex items-center p-4"
+          className="w-full flex items-center p-3"
           onClick={handleGoToCustomExercise}
         >
-          <div className="w-12 h-12 bg-gray-600 rounded-md flex items-center justify-center mr-4">
-            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-6 h-6">
+          <div className="w-10 h-10 bg-gray-600 rounded-md flex items-center justify-center mr-3">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-5 h-5">
               <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
             </svg>
           </div>
-          <span className="text-lg">Add Custom Exercise</span>
+          <span className="text-base">Add Custom Exercise</span>
         </button>
       </div>
-      
       {loading ? (
         <div className="text-center py-10">
           <div className="inline-block h-8 w-8 animate-spin rounded-full border-4 border-solid border-current border-r-transparent align-[-0.125em] motion-reduce:animate-[spin_1.5s_linear_infinite]" role="status">
@@ -165,26 +163,26 @@ export default function ExercisesPage() {
           </div>
         </div>
       ) : (
-        <div className="space-y-4 mb-32">
+        <div className="space-y-2 mb-24">
           {Object.keys(groupedExercises).sort().map(category => (
             <div key={category}>
-              <h2 className="text-xl font-bold mb-2">{category}</h2>
-              <div className="space-y-2">
+              <h2 className="text-base font-bold mb-1">{category}</h2>
+              <div className="space-y-1">
                 {groupedExercises[category].map(exercise => (
                   <div 
                     key={exercise.id}
-                    className={`card flex items-center justify-between p-4 ${selectedExercises.includes(exercise.id) ? 'border-2 border-accent' : ''}`}
+                    className={`card flex items-center justify-between px-3 py-2 rounded-lg min-h-[44px] ${selectedExercises.includes(exercise.id) ? 'border-2 border-accent' : ''}`}
                     onClick={() => handleToggleSelect(exercise.id)}
                   >
                     <div className="flex items-center">
-                      <div className="w-12 h-12 bg-gray-600 rounded-md flex items-center justify-center mr-4">
+                      <div className="w-8 h-8 bg-gray-600 rounded-md flex items-center justify-center mr-3 text-base font-bold">
                         {exercise.name.substring(0, 1)}
                       </div>
-                      <span>{exercise.name}</span>
+                      <span className="text-base">{exercise.name}</span>
                     </div>
                     {selectedExercises.includes(exercise.id) && (
-                      <div className="w-8 h-8 rounded-full bg-accent flex items-center justify-center text-white">
-                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-5 h-5">
+                      <div className="w-6 h-6 rounded-full bg-accent flex items-center justify-center text-white">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-4 h-4">
                           <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
                         </svg>
                       </div>

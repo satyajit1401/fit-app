@@ -10,6 +10,7 @@ import {
   getUserProfile 
 } from './supabase';
 import { useRouter } from 'next/navigation';
+import { getWorkouts, getExercises, getWorkoutExercises } from './api';
 
 type User = {
   id: string;
@@ -50,6 +51,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
+  // Helper to cache all data after login
+  const cacheAllData = async (userId: string) => {
+    // 1. Fetch and cache workouts first
+    const workouts = await getWorkouts();
+    // 2. Fetch and cache exercises in the background
+    getExercises();
+    // 3. Fetch and cache sets for each workout in the background
+    workouts.forEach(w => {
+      if (w.id) getWorkoutExercises(w.id);
+    });
+  };
+
   // Check for user on mount
   useEffect(() => {
     async function getInitialUser() {
@@ -72,6 +85,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           if (data) {
             setProfile(data);
           }
+          
+          // Cache all data after login
+          cacheAllData(currentUser.id);
         }
       } catch (error) {
         console.error('Error checking authentication:', error);
@@ -130,6 +146,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         
         // Fetch user profile after sign in
         await refreshProfile();
+        
+        // Cache all data after login
+        cacheAllData(data.user.id);
         
         router.push('/workouts');
         return { success: true };
