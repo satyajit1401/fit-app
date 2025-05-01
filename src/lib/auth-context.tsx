@@ -50,6 +50,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
+  // Upsert user into users table to ensure foreign key integrity
+  const upsertUser = async (userObj: User) => {
+    if (!userObj) return;
+    try {
+      await supabase.from('users').upsert({
+        id: userObj.id,
+        email: userObj.email,
+        full_name: userObj.fullName || null,
+        username: userObj.username || null,
+      });
+    } catch (error) {
+      console.error('Error upserting user:', error);
+    }
+  };
+
   // Check for user on mount
   useEffect(() => {
     async function getInitialUser() {
@@ -60,12 +75,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const currentUser = await getCurrentUser();
         
         if (currentUser) {
-          setUser({
+          const userObj = {
             id: currentUser.id,
             email: currentUser.email || '',
             fullName: currentUser.user_metadata?.full_name,
             username: currentUser.user_metadata?.username
-          });
+          };
+          setUser(userObj);
+          await upsertUser(userObj);
           
           // Fetch user profile data
           const { data } = await getUserProfile(currentUser.id);
@@ -86,12 +103,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const { data: authListener } = supabase.auth.onAuthStateChange(
       async (event, session) => {
         if (session && session.user) {
-          setUser({
+          const userObj = {
             id: session.user.id,
             email: session.user.email || '',
             fullName: session.user.user_metadata?.full_name,
             username: session.user.user_metadata?.username
-          });
+          };
+          setUser(userObj);
+          await upsertUser(userObj);
           
           // Fetch user profile data
           const { data } = await getUserProfile(session.user.id);
@@ -180,6 +199,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setLoading(false);
     }
   };
+
+  // Log current Auth user id for debugging when user changes
+  useEffect(() => {
+    if (user) {
+      console.log('Current Auth user.id:', user.id);
+    } else {
+      console.log('No user loaded');
+    }
+  }, [user]);
 
   return (
     <AuthContext.Provider

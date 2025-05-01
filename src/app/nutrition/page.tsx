@@ -2,9 +2,11 @@
 
 import { useState, useEffect } from 'react';
 import Layout from '@/components/layout/Layout';
-import Link from 'next/link';
 import { useAuth } from '@/lib/auth-context';
-import { getNutritionLogs, NutritionLog } from '@/lib/api';
+import { getNutritionLogs, NutritionLog, getNutritionTargets, updateNutritionTargets, saveMealToBackend, getAllPastMeals, updateMealInBackend } from '@/lib/api';
+import DateNavigation from '@/components/nutrition/DateNavigation';
+import PersonalizationModal from '@/components/nutrition/PersonalizationModal';
+import AddMealModal from '@/components/nutrition/AddMealModal';
 
 interface MealGroup {
   name: string;
@@ -16,20 +18,75 @@ interface MealGroup {
   items: NutritionLog[];
 }
 
+interface TargetNutrition {
+  targetCalories: number;
+  targetProtein: number;
+  targetCarbs: number;
+  targetFat: number;
+  targetWater: number;
+  weeklyWeightTargets: number[];
+}
+
+// Extend NutritionLog for local use to include optional fields
+interface NutritionLogDisplay extends NutritionLog {
+  meal_time?: string;
+  notes?: string;
+  protein_g?: number;
+  carbs_g?: number;
+  fat_g?: number;
+}
+
+const DEFAULT_TARGETS = {
+  targetCalories: 2500,
+  targetProtein: 150,
+  targetCarbs: 200,
+  targetFat: 67,
+  targetWater: 3000,
+  weeklyWeightTargets: [],
+};
+
 export default function NutritionPage() {
   const [date, setDate] = useState(new Date());
   const [loading, setLoading] = useState(true);
-  const [nutritionLogs, setNutritionLogs] = useState<NutritionLog[]>([]);
-  const { user } = useAuth();
+  const [savingTargets, setSavingTargets] = useState(false);
+  const [nutritionLogs, setNutritionLogs] = useState<NutritionLogDisplay[]>([]);
+  const [isPersonalizationOpen, setIsPersonalizationOpen] = useState(false);
+  const [isAddMealOpen, setIsAddMealOpen] = useState(false);
+  const [isCopyMealOpen, setIsCopyMealOpen] = useState(false);
+  const { user, loading: userLoading } = useAuth();
 
-  // Target nutrition values - these would normally come from user settings
-  const targetNutrition = {
-    targetCalories: 2500,
-    targetProtein: 180,
-    targetCarbs: 250,
-    targetFat: 80,
-    targetWater: 3000, // ml
-  };
+  const [targetNutrition, setTargetNutrition] = useState<TargetNutrition>(DEFAULT_TARGETS);
+  
+  const [pastMeals, setPastMeals] = useState<any[]>([]);
+  const [selectedMealIndex, setSelectedMealIndex] = useState<number | null>(null);
+  const [isEditMealOpen, setIsEditMealOpen] = useState(false);
+  const [editMealData, setEditMealData] = useState<NutritionLogDisplay | null>(null);
+  
+  // Load saved targets from database on component mount
+  useEffect(() => {
+    const loadTargets = async () => {
+      if (user) {
+        setLoading(true);
+        try {
+          const targets = await getNutritionTargets(user.id);
+          console.log('Loaded targets from database:', targets);
+          if (targets) {
+            setTargetNutrition(targets);
+          } else {
+            setTargetNutrition(DEFAULT_TARGETS);
+          }
+        } catch (error) {
+          console.error('Error loading targets:', error);
+          setTargetNutrition(DEFAULT_TARGETS);
+        } finally {
+          setLoading(false);
+        }
+      } else {
+        setTargetNutrition(DEFAULT_TARGETS);
+      }
+    };
+    loadTargets();
+  }, [user]);
   
   useEffect(() => {
     const fetchNutritionData = async () => {
@@ -49,9 +106,9 @@ export default function NutritionPage() {
   const totals = nutritionLogs.reduce((acc, item) => {
     return {
       calories: acc.calories + (item.calories || 0),
-      protein: acc.protein + (item.protein || 0),
-      carbs: acc.carbs + (item.carbs || 0),
-      fat: acc.fat + (item.fats || 0),
+      protein: acc.protein + (item.protein ?? item.protein_g ?? 0),
+      carbs: acc.carbs + (item.carbs ?? item.carbs_g ?? 0),
+      fat: acc.fat + (item.fat_g ?? item.fats ?? 0),
     };
   }, { calories: 0, protein: 0, carbs: 0, fat: 0 });
   
@@ -62,7 +119,7 @@ export default function NutritionPage() {
     if (!acc[mealType]) {
       acc[mealType] = {
         name: mealType,
-        time: '12:00', // Default time
+        time: item.meal_time || '12:00',
         calories: 0,
         protein: 0,
         carbs: 0,
@@ -72,19 +129,15 @@ export default function NutritionPage() {
     }
     
     acc[mealType].calories += item.calories || 0;
-    acc[mealType].protein += item.protein || 0;
-    acc[mealType].carbs += item.carbs || 0;
-    acc[mealType].fat += item.fats || 0;
+    acc[mealType].protein += item.protein ?? item.protein_g ?? 0;
+    acc[mealType].carbs += item.carbs ?? item.carbs_g ?? 0;
+    acc[mealType].fat += item.fats ?? item.fat_g ?? 0;
     acc[mealType].items.push(item);
     
     return acc;
   }, {});
   
   const meals = Object.values(mealGroups);
-  
-  const formatDate = (date: Date) => {
-    return date.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
-  };
   
   const calculatePercentage = (consumed: number, target: number) => {
     return Math.min(Math.round((consumed / target) * 100), 100);
@@ -93,20 +146,111 @@ export default function NutritionPage() {
   const formatMacro = (value: number) => {
     return value.toFixed(0) + 'g';
   };
+
+  const handlePersonalizationSave = async (data: TargetNutrition) => {
+    console.log('Main page: handlePersonalizationSave called', data);
+    setSavingTargets(true);
+    try {
+      if (!user) throw new Error('No user');
+      const success = await updateNutritionTargets(data, user.id);
+      if (success) {
+        const latest = await getNutritionTargets(user.id);
+        setTargetNutrition(latest || DEFAULT_TARGETS);
+        setIsPersonalizationOpen(false);
+      } else {
+        throw new Error('Failed to save targets');
+      }
+    } catch (error) {
+      console.error('Error saving targets:', error);
+    } finally {
+      setSavingTargets(false);
+    }
+  };
+
+  const handleAddMeal = async (data: any) => {
+    console.log('Main page: handleAddMeal called', data);
+    if (!user) return;
+    // Map AddMealModal data to backend fields
+    const meal = {
+      meal_type: data.name || 'Meal',
+      description: data.description || '',
+      calories: data.calories,
+      protein: data.protein,
+      carbs: data.carbs,
+      fat: data.fat,
+      user_id: user.id,
+    };
+    const success = await saveMealToBackend(meal);
+    if (success) {
+      const formattedDate = date.toISOString().split('T')[0];
+      const logs = await getNutritionLogs(formattedDate);
+      setNutritionLogs(logs);
+    }
+    setIsAddMealOpen(false);
+  };
+
+  const openCopyMealModal = async () => {
+    setIsCopyMealOpen(true);
+    if (!user) return;
+    const meals = await getAllPastMeals(user.id);
+    setPastMeals(meals);
+    setSelectedMealIndex(null);
+  };
+
+  const handleCopyMeal = async () => {
+    if (selectedMealIndex === null) return;
+    const meal = pastMeals[selectedMealIndex];
+    const today = new Date().toISOString().split('T')[0];
+    const now = new Date().toTimeString().slice(0, 8);
+    if (!user) return;
+    const success = await saveMealToBackend({
+      meal_type: meal.meal_type,
+      description: meal.notes || '',
+      calories: meal.calories,
+      protein: meal.protein_g,
+      carbs: meal.carbs_g,
+      fat: meal.fat_g,
+      user_id: user.id,
+      date: today,
+      time: now,
+    });
+    if (success) {
+      const logs = await getNutritionLogs(today);
+      setNutritionLogs(logs);
+    }
+    setIsCopyMealOpen(false);
+  };
+
+  const handleEditMeal = (meal: NutritionLogDisplay) => {
+    setEditMealData(meal);
+    setIsEditMealOpen(true);
+  };
+
+  const handleSaveEditMeal = async (data: any) => {
+    if (!editMealData) return;
+    const updates = {
+      meal_type: data.name || editMealData.meal_type,
+      description: data.description || editMealData.notes || '',
+      calories: data.calories,
+      protein: data.protein,
+      carbs: data.carbs,
+      fat: data.fat,
+    };
+    await updateMealInBackend(editMealData.id, updates);
+    const formattedDate = date.toISOString().split('T')[0];
+    const logs = await getNutritionLogs(formattedDate);
+    setNutritionLogs(logs);
+    setIsEditMealOpen(false);
+    setEditMealData(null);
+  };
   
-  const rightElement = (
-    <Link href="/nutrition/add-meal">
-      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-7 h-7">
-        <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-      </svg>
-    </Link>
-  );
+  if (userLoading || !user) {
+    return <div className="flex justify-center py-10">Loading user...</div>;
+  }
   
   return (
-    <Layout title="NUTRITION" rightElement={rightElement}>
-      <div className="mb-6">
-        <h2 className="text-center text-xl font-medium">{formatDate(date)}</h2>
-      </div>
+    <Layout title="NUTRITION">
+      <DateNavigation currentDate={date} onDateChange={setDate} />
       
       {loading ? (
         <div className="flex justify-center py-10">
@@ -119,13 +263,15 @@ export default function NutritionPage() {
           <div className="card p-5 mb-6">
             <div className="flex justify-between mb-4">
               <div>
-                <h3 className="text-lg font-medium">Daily Targets</h3>
+                <h3 className="text-lg font-medium">Daily Targets <span className="text-xs text-text-light">({targetNutrition.targetCalories} kcal / {targetNutrition.targetProtein}g P / {targetNutrition.targetCarbs}g C / {targetNutrition.targetFat}g F)</span></h3>
               </div>
-              <div className="text-text-light">
-                <span className="text-accent font-bold">{totals.calories}</span>
-                {' / '}
-                {targetNutrition.targetCalories} cal
-              </div>
+              <button
+                onClick={() => setIsPersonalizationOpen(true)}
+                disabled={savingTargets}
+                className="text-accent font-medium disabled:opacity-50"
+              >
+                {savingTargets ? 'Saving...' : 'Personalize'}
+              </button>
             </div>
             
             <div className="mb-4">
@@ -141,7 +287,7 @@ export default function NutritionPage() {
               </div>
             </div>
             
-            <div className="grid grid-cols-3 gap-2 mb-4">
+            <div className="grid grid-cols-3 gap-4 mb-4">
               <div className="bg-background rounded-lg p-3 text-center">
                 <div className="text-xs text-text-light mb-1">Protein</div>
                 <div className="font-medium">
@@ -182,7 +328,7 @@ export default function NutritionPage() {
             </div>
           </div>
           
-          <div className="space-y-4 mb-20">
+          <div className="space-y-4">
             <h3 className="text-lg font-medium">Today's Meals</h3>
             
             {meals.length > 0 ? (
@@ -202,12 +348,27 @@ export default function NutritionPage() {
                   </div>
                   
                   <div className="p-4">
-                    {meal.items.map((item, itemIndex) => (
-                      <div key={itemIndex} className="flex justify-between py-2 border-b border-gray-700 last:border-0">
-                        <div>{item.food_item}</div>
-                        <div className="text-text-light">{item.calories} cal</div>
-                      </div>
-                    ))}
+                    {meal.items.map((item, itemIndex) => {
+                      const displayItem = item as NutritionLogDisplay;
+                      return (
+                        <div key={itemIndex} className="flex flex-col py-2 border-b border-gray-700 last:border-0">
+                          <div className="flex justify-between">
+                            <div>{displayItem.notes}</div>
+                            <div className="text-text-light">{displayItem.calories} cal</div>
+                            <button
+                              className="ml-2 text-accent text-xs underline"
+                              onClick={() => handleEditMeal(displayItem)}
+                            >
+                              Edit
+                            </button>
+                          </div>
+                          <div className="text-xs text-text-light flex justify-between">
+                            <span>Time: {displayItem.meal_time || '--:--'}</span>
+                            <span>P: {(displayItem.protein ?? displayItem.protein_g ?? 0).toFixed(0)}g · C: {(displayItem.carbs ?? displayItem.carbs_g ?? 0).toFixed(0)}g · F: {(displayItem.fats ?? displayItem.fat_g ?? 0).toFixed(0)}g</span>
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
               ))
@@ -217,16 +378,117 @@ export default function NutritionPage() {
               </div>
             )}
             
-            <Link href="/nutrition/add-meal">
-              <button className="w-full py-4 flex items-center justify-center text-accent font-medium">
+            <div className="flex gap-2">
+              <button
+                onClick={() => setIsAddMealOpen(true)}
+                className="w-full py-4 flex items-center justify-center text-accent font-medium"
+              >
                 <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-6 h-6 mr-2">
                   <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
                 </svg>
                 ADD MEAL
               </button>
-            </Link>
+              <button
+                onClick={openCopyMealModal}
+                className="w-full py-4 flex items-center justify-center text-accent font-medium"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-6 h-6 mr-2">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M8 12h8m-4-4v8" />
+                </svg>
+                COPY MEAL
+              </button>
+            </div>
           </div>
         </>
+      )}
+
+      <PersonalizationModal
+        isOpen={isPersonalizationOpen}
+        onClose={() => setIsPersonalizationOpen(false)}
+        onSave={handlePersonalizationSave}
+        initialData={targetNutrition}
+      />
+
+      <AddMealModal
+        isOpen={isAddMealOpen}
+        onClose={() => setIsAddMealOpen(false)}
+        onSave={handleAddMeal}
+        targetValues={{
+          targetCalories: targetNutrition.targetCalories,
+          targetProtein: targetNutrition.targetProtein,
+          targetCarbs: targetNutrition.targetCarbs,
+          targetFat: targetNutrition.targetFat
+        }}
+      />
+
+      {isCopyMealOpen && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-card rounded-xl w-full max-w-md max-h-[90vh] flex flex-col">
+            <div className="p-6 overflow-y-auto">
+              <h2 className="text-xl font-bold mb-4">Copy a Past Meal</h2>
+              {pastMeals.length === 0 ? (
+                <div className="text-center text-text-light">No past meals found.</div>
+              ) : (
+                <form>
+                  <div className="space-y-4">
+                    {pastMeals.map((meal, idx) => (
+                      <label key={idx} className="flex items-start gap-3 cursor-pointer p-2 rounded hover:bg-background">
+                        <input
+                          type="radio"
+                          name="copyMeal"
+                          checked={selectedMealIndex === idx}
+                          onChange={() => setSelectedMealIndex(idx)}
+                          className="mt-1"
+                        />
+                        <div>
+                          <div className="font-medium">{meal.meal_type}</div>
+                          <div className="text-sm text-text-light">{meal.notes}</div>
+                        </div>
+                      </label>
+                    ))}
+                  </div>
+                </form>
+              )}
+            </div>
+            <div className="p-6 border-t border-gray-700 mt-auto flex gap-4">
+              <button
+                onClick={() => setIsCopyMealOpen(false)}
+                className="flex-1 p-3 bg-background text-white rounded-lg font-medium"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleCopyMeal}
+                disabled={selectedMealIndex === null || !user}
+                className="flex-1 p-3 bg-accent text-white rounded-lg font-medium disabled:opacity-50"
+              >
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {isEditMealOpen && editMealData && (
+        <AddMealModal
+          isOpen={isEditMealOpen}
+          onClose={() => { setIsEditMealOpen(false); setEditMealData(null); }}
+          onSave={handleSaveEditMeal}
+          targetValues={{
+            targetCalories: targetNutrition.targetCalories,
+            targetProtein: targetNutrition.targetProtein,
+            targetCarbs: targetNutrition.targetCarbs,
+            targetFat: targetNutrition.targetFat
+          }}
+          initialData={{
+            name: editMealData.meal_type,
+            description: editMealData.notes || '',
+            calories: editMealData.calories,
+            protein: editMealData.protein ?? editMealData.protein_g ?? 0,
+            carbs: editMealData.carbs ?? editMealData.carbs_g ?? 0,
+            fat: editMealData.fats ?? editMealData.fat_g ?? 0,
+          }}
+        />
       )}
     </Layout>
   );
