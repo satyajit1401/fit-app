@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
+import { prewarmCache, resetCacheInitialization } from './cache';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
@@ -59,6 +60,11 @@ export const signIn = async (email: string, password: string) => {
       
       if (error) throw error;
       
+      // Prewarm cache with initial data if login is successful
+      if (data.user) {
+        prewarmCache(data.user.id);
+      }
+      
       return { data, error: null, userData: null };
     }
     
@@ -70,6 +76,11 @@ export const signIn = async (email: string, password: string) => {
     
     if (error) throw error;
     
+    // Prewarm cache with initial data if login is successful
+    if (data.user) {
+      prewarmCache(data.user.id);
+    }
+    
     return { data, error: null, userData };
   } catch (error) {
     return { data: null, error, userData: null };
@@ -77,6 +88,8 @@ export const signIn = async (email: string, password: string) => {
 };
 
 export const signOut = async () => {
+  // Reset cache initialization flag before signing out
+  resetCacheInitialization();
   return await supabase.auth.signOut();
 };
 

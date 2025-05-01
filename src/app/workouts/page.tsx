@@ -24,25 +24,16 @@ export default function WorkoutsPage() {
     }
   }, [user]);
   
-  const rightElement = (
-    <Link href="/workouts/create">
-      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-7 h-7">
-        <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-      </svg>
-    </Link>
-  );
-  
   return (
-    <Layout title="STRENGTH TRAINER" rightElement={rightElement}>
+    <Layout title="STRENGTH TRAINER">
       <div className="mb-6">
         <div className="flex border-b border-gray-700">
-          <div className="flex-1 pb-2 text-center text-accent border-b-2 border-accent font-medium">
+          <div className="flex-1 pb-2 text-center text-[#45D67B] border-b-2 border-[#45D67B] font-medium">
             MY WORKOUTS
           </div>
         </div>
       </div>
-      
-      <div className="space-y-4">
+      <div className="flex flex-col gap-3">
         {loading && (
           <div className="text-center py-10">
             <div className="inline-block h-8 w-8 animate-spin rounded-full border-4 border-solid border-current border-r-transparent align-[-0.125em] motion-reduce:animate-[spin_1.5s_linear_infinite]" role="status">
@@ -50,26 +41,25 @@ export default function WorkoutsPage() {
             </div>
           </div>
         )}
-        
         {!loading && workouts.length > 0 && workouts.map(workout => (
-          <Link href={`/workouts/${workout.id}`} key={workout.id}>
-            <div className="card flex items-center justify-between p-6">
-              <span className="font-medium">{workout.name}</span>
-              <span className="text-text-light">⋯</span>
+          <Link href={`/workouts/${workout.id}`} key={workout.id} className="block">
+            <div className="card flex items-center justify-between px-4 py-3 rounded-lg min-h-[52px] bg-[#1E2128] border border-[#2C3038] shadow-sm">
+              <span className="font-medium text-base">{workout.name}</span>
+              <span className="text-[#9DA1A8] text-lg">⋯</span>
             </div>
           </Link>
         ))}
-        
         {!loading && workouts.length === 0 && (
-          <div className="text-center text-text-light py-10">
+          <div className="text-center text-[#9DA1A8] py-10">
             No workouts found. Create your first workout!
           </div>
         )}
       </div>
-      
-      <div className="mt-6">
+      <div className="mt-10">
         <Link href="/workouts/create">
-          <button className="btn-primary">CREATE NEW WORKOUT</button>
+          <button className="w-full py-3.5 rounded-full text-base font-medium bg-gradient-to-b from-[#45D67B] to-[#2DCB6C] text-white shadow-lg">
+            CREATE NEW WORKOUT
+          </button>
         </Link>
       </div>
     </Layout>

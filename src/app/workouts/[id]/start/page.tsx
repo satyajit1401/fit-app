@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import Layout from '@/components/layout/Layout';
 import { useRouter } from 'next/navigation';
 
@@ -41,7 +41,27 @@ export default function WorkoutStartPage({ params }: WorkoutStartProps) {
     totalVolume: 0
   });
   
-  const [restTimer, setRestTimer] = useState<number | null>(null);
+  // Time tracking state
+  const [elapsedTime, setElapsedTime] = useState("0:00");
+  const timerIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  
+  // Initialize timer on component mount
+  useEffect(() => {
+    // Update time immediately
+    setElapsedTime(calculateElapsedTime());
+    
+    // Set up interval to update time every second
+    timerIntervalRef.current = setInterval(() => {
+      setElapsedTime(calculateElapsedTime());
+    }, 1000);
+    
+    // Clean up interval on unmount
+    return () => {
+      if (timerIntervalRef.current) {
+        clearInterval(timerIntervalRef.current);
+      }
+    };
+  }, []);
   
   const formatTime = (timeInSeconds: number) => {
     const minutes = Math.floor(timeInSeconds / 60);
@@ -72,20 +92,6 @@ export default function WorkoutStartPage({ params }: WorkoutStartProps) {
       
       return newWorkout;
     });
-    
-    // Start rest timer (60 seconds)
-    setRestTimer(60);
-    
-    // Decrement timer
-    const interval = setInterval(() => {
-      setRestTimer(prev => {
-        if (prev === null || prev <= 0) {
-          clearInterval(interval);
-          return null;
-        }
-        return prev - 1;
-      });
-    }, 1000);
   };
   
   const handleAddSet = (exerciseId: number) => {
@@ -166,32 +172,17 @@ export default function WorkoutStartPage({ params }: WorkoutStartProps) {
       backUrl={`/workouts/${workoutId}`}
       rightElement={
         <div className="flex flex-col items-end">
-          <div className="text-accent text-xs">{calculateElapsedTime()}</div>
+          <div className="text-accent text-xs">{elapsedTime}</div>
           <div className="text-xs text-text-light">{workout.totalVolume} kg</div>
         </div>
       }
     >
-      {restTimer !== null && (
-        <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50">
-          <div className="text-center">
-            <div className="text-6xl font-bold mb-2">{restTimer}</div>
-            <div className="text-text-light">Rest Timer</div>
-            <button 
-              className="mt-4 px-6 py-2 bg-card rounded-full text-white"
-              onClick={() => setRestTimer(null)}
-            >
-              Skip
-            </button>
-          </div>
-        </div>
-      )}
-      
-      <div className="space-y-6 mb-24">
+      <div className="space-y-3 mb-24">
         {workout.exercises.map(exercise => (
-          <div key={exercise.id} className="card">
-            <div className="flex items-center justify-between p-4 border-b border-gray-700">
+          <div key={exercise.id} className="card flex flex-col rounded-lg bg-[#1E2128] border border-[#2C3038] shadow-sm mb-3">
+            <div className="flex items-center justify-between p-4 border-b border-[#2C3038]">
               <div className="flex items-center">
-                <div className="w-16 h-16 bg-gray-600 rounded-md mr-4 overflow-hidden">
+                <div className="w-14 h-14 bg-gray-600 rounded-md mr-3 overflow-hidden">
                   {exercise.thumbnail ? (
                     <img src={exercise.thumbnail} alt={exercise.name} className="w-full h-full object-cover" />
                   ) : (
@@ -199,8 +190,8 @@ export default function WorkoutStartPage({ params }: WorkoutStartProps) {
                   )}
                 </div>
                 <div>
-                  <h3 className="font-medium">{exercise.name}</h3>
-                  <p className="text-text-light">{exercise.sets.length} Sets</p>
+                  <h3 className="font-medium text-base">{exercise.name}</h3>
+                  <p className="text-[#9DA1A8] text-sm">{exercise.sets.length} Sets</p>
                 </div>
               </div>
             </div>
@@ -221,7 +212,6 @@ export default function WorkoutStartPage({ params }: WorkoutStartProps) {
                 <div 
                   key={set.id} 
                   className={`flex items-center justify-between mb-2 p-2 ${set.completed ? 'bg-gray-700 bg-opacity-30 rounded-lg' : ''}`}
-                  onClick={() => !set.completed && markSetComplete(exercise.id, set.id)}
                 >
                   <div className="w-8 flex-shrink-0 text-text-light">{index + 1}</div>
                   
@@ -246,15 +236,26 @@ export default function WorkoutStartPage({ params }: WorkoutStartProps) {
                     />
                   </div>
                   
-                  <button 
-                    className="w-8 flex-shrink-0 text-text-light"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleDeleteSet(exercise.id, set.id);
-                    }}
-                  >
-                    ×
-                  </button>
+                  {!set.completed ? (
+                    <button 
+                      className="w-8 flex-shrink-0 text-[#45D67B]"
+                      onClick={() => markSetComplete(exercise.id, set.id)}
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-5 h-5">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                      </svg>
+                    </button>
+                  ) : (
+                    <button 
+                      className="w-8 flex-shrink-0 text-text-light"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleDeleteSet(exercise.id, set.id);
+                      }}
+                    >
+                      ×
+                    </button>
+                  )}
                 </div>
               ))}
               
@@ -270,7 +271,12 @@ export default function WorkoutStartPage({ params }: WorkoutStartProps) {
       </div>
       
       <div className="fixed bottom-20 left-0 w-full p-4">
-        <button className="btn-primary" onClick={handleFinishWorkout}>FINISH WORKOUT</button>
+        <button 
+          className="w-full py-3.5 rounded-full text-base font-medium bg-gradient-to-b from-[#45D67B] to-[#2DCB6C] text-white shadow-lg"
+          onClick={handleFinishWorkout}
+        >
+          FINISH WORKOUT
+        </button>
       </div>
     </Layout>
   );
