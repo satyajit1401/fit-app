@@ -9,79 +9,81 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey);
 // Auth helper functions
 export const signUp = async (email: string, password: string, fullName: string, username?: string) => {
   try {
-    // First register the user in our database using the API function
-    const { data: userId, error: apiError } = await supabase.rpc(
-      'register_user',
-      { 
-        p_email: email, 
-        p_password: password, 
-        p_full_name: fullName,
-        p_username: username
-      }
-    );
-    
-    if (apiError) throw apiError;
-    
-    // Then sign up with Supabase Auth
-    const { data, error } = await supabase.auth.signUp({
+    // First sign up with Supabase Auth to get the user ID
+    const { data: authData, error: authError } = await supabase.auth.signUp({
       email,
       password,
       options: {
         data: {
           full_name: fullName,
-          username,
-          user_id: userId
+          username
         }
       }
     });
     
-    if (error) throw error;
+    if (authError) throw authError;
+    if (!authData.user) throw new Error('No user data returned from auth signup');
+
+    // Store the password and registration info temporarily for use after confirmation
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('pending_registration', JSON.stringify({
+        email,
+        password,
+        fullName,
+        username
+      }));
+    }
     
-    return { data, error: null };
+    // Return confirmation state
+    return { data: authData, error: null, confirmationSent: true };
   } catch (error) {
     return { data: null, error };
   }
 };
 
+// Call this after user confirms email and logs in for the first time
+export const completeRegistrationAfterConfirmation = async (userId: string, email: string) => {
+  if (typeof window === 'undefined') return { success: false, error: 'Not in browser' };
+  const pending = localStorage.getItem('pending_registration');
+  if (!pending) return { success: false, error: 'No pending registration found' };
+  const { password, fullName, username } = JSON.parse(pending);
+  try {
+    const { error: apiError } = await supabase.rpc(
+      'register_user',
+      {
+        p_id: userId,
+        p_email: email,
+        p_full_name: fullName,
+        p_password: password,
+        p_username: username
+      }
+    );
+    if (apiError) throw apiError;
+    // Clean up
+    localStorage.removeItem('pending_registration');
+    return { success: true };
+  } catch (error) {
+    return { success: false, error };
+  }
+};
+
 export const signIn = async (email: string, password: string) => {
   try {
-    // Use the authenticate_user function from our API
-    const { data: userData, error: apiError } = await supabase.rpc(
-      'authenticate_user',
-      { p_email: email, p_password: password }
-    );
-    
-    if (apiError) {
-      // Fallback to Supabase Auth if our custom function fails
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email,
-        password
-      });
-      
-      if (error) throw error;
-      
-      // Prewarm cache with initial data if login is successful
-      if (data.user) {
-        prewarmCache(data.user.id);
-      }
-      
-      return { data, error: null, userData: null };
-    }
-    
-    // If our API function worked, also sign in with Supabase Auth
     const { data, error } = await supabase.auth.signInWithPassword({
       email,
       password
     });
-    
-    if (error) throw error;
-    
+
+    if (error) {
+      return { data: null, error, userData: null };
+    }
+
     // Prewarm cache with initial data if login is successful
     if (data.user) {
       prewarmCache(data.user.id);
     }
-    
-    return { data, error: null, userData };
+
+    return { data, error: null, userData: null };
   } catch (error) {
     return { data: null, error, userData: null };
   }

@@ -30,6 +30,7 @@ interface FormData {
   targetProtein: string;
   targetCarbs: string;
   targetFat: string;
+  targetWater: string;
   weeklyWeightTargets: number[];
   goal: Goal;
 }
@@ -48,6 +49,7 @@ export default function PersonalizationModal({ isOpen, onClose, onSave, initialD
     targetProtein: '',
     targetCarbs: '',
     targetFat: '',
+    targetWater: '',
     weeklyWeightTargets: [],
     goal: 'maintenance'
   });
@@ -72,6 +74,7 @@ export default function PersonalizationModal({ isOpen, onClose, onSave, initialD
         targetProtein: '',
         targetCarbs: '',
         targetFat: '',
+        targetWater: '',
         weeklyWeightTargets: [],
         goal: 'maintenance'
       });
@@ -87,6 +90,7 @@ export default function PersonalizationModal({ isOpen, onClose, onSave, initialD
         targetProtein: initialData.targetProtein.toString(),
         targetCarbs: initialData.targetCarbs.toString(),
         targetFat: initialData.targetFat.toString(),
+        targetWater: initialData.targetWater?.toString() || '3000',
       }));
     }
   }, [initialData]);
@@ -222,7 +226,8 @@ export default function PersonalizationModal({ isOpen, onClose, onSave, initialD
       const targetProtein = Number(formData.targetProtein);
       const targetCarbs = Number(formData.targetCarbs);
       const targetFat = Number(formData.targetFat);
-      if (!targetCalories || !targetProtein || !targetCarbs || !targetFat) {
+      const targetWater = Number(formData.targetWater);
+      if (!targetCalories || !targetProtein || !targetCarbs || !targetFat || !targetWater) {
         setError('Please ensure all values are filled');
         setIsSaving(false);
         return;
@@ -232,7 +237,7 @@ export default function PersonalizationModal({ isOpen, onClose, onSave, initialD
         targetProtein,
         targetCarbs,
         targetFat,
-        targetWater: 3000,
+        targetWater,
         weeklyWeightTargets: formData.weeklyWeightTargets,
       };
       console.log('PersonalizationModal: Calling onSave with data:', data);
@@ -460,6 +465,18 @@ export default function PersonalizationModal({ isOpen, onClose, onSave, initialD
                   type="number"
                   value={formData.targetFat}
                   onChange={(e) => setFormData(prev => ({ ...prev, targetFat: e.target.value }))}
+                  className="w-full p-3 bg-background rounded-lg"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm text-text-light mb-1">Water (ml)</label>
+                <input
+                  type="number"
+                  value={formData.targetWater}
+                  onChange={e => setFormData(prev => ({ ...prev, targetWater: e.target.value }))}
+                  min={0}
+                  step={100}
                   className="w-full p-3 bg-background rounded-lg"
                 />
               </div>

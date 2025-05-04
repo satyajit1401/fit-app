@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import Layout from '@/components/layout/Layout';
 import { useAuth } from '@/lib/auth-context';
-import { getNutritionLogs, NutritionLog, getNutritionTargets, updateNutritionTargets, saveMealToBackend, getAllPastMeals, updateMealInBackend } from '@/lib/api';
+import { getNutritionLogs, NutritionLog, getNutritionTargets, updateNutritionTargets, saveMealToBackend, getAllPastMeals, updateMealInBackend, getWaterIntake, updateWaterIntake, softDeleteMeal } from '@/lib/api';
 import DateNavigation from '@/components/nutrition/DateNavigation';
 import PersonalizationModal from '@/components/nutrition/PersonalizationModal';
 import AddMealModal from '@/components/nutrition/AddMealModal';
@@ -54,6 +54,8 @@ export default function NutritionPage() {
   const [isAddMealOpen, setIsAddMealOpen] = useState(false);
   const [isCopyMealOpen, setIsCopyMealOpen] = useState(false);
   const { user, loading: userLoading } = useAuth();
+  const [waterIntake, setWaterIntake] = useState(0);
+  const [isEditingWater, setIsEditingWater] = useState(false);
 
   const [targetNutrition, setTargetNutrition] = useState<TargetNutrition>(DEFAULT_TARGETS);
   
@@ -62,13 +64,15 @@ export default function NutritionPage() {
   const [isEditMealOpen, setIsEditMealOpen] = useState(false);
   const [editMealData, setEditMealData] = useState<NutritionLogDisplay | null>(null);
   
-  // Load saved targets from database on component mount
+  // Load saved targets from database on component mount or date change
   useEffect(() => {
     const loadTargets = async () => {
       if (user) {
         setLoading(true);
         try {
-          const targets = await getNutritionTargets(user.id);
+          const formattedDate = date.toISOString().split('T')[0];
+          console.log('Loading targets for date:', formattedDate);
+          const targets = await getNutritionTargets(user.id, formattedDate);
           console.log('Loaded targets from database:', targets);
           if (targets) {
             setTargetNutrition(targets);
@@ -86,7 +90,7 @@ export default function NutritionPage() {
       }
     };
     loadTargets();
-  }, [user]);
+  }, [user, date]);
   
   useEffect(() => {
     const fetchNutritionData = async () => {
@@ -100,6 +104,18 @@ export default function NutritionPage() {
     };
     
     fetchNutritionData();
+  }, [user, date]);
+  
+  // Load water intake when date changes
+  useEffect(() => {
+    const loadWaterIntake = async () => {
+      if (user) {
+        const formattedDate = date.toISOString().split('T')[0];
+        const intake = await getWaterIntake(user.id, formattedDate);
+        setWaterIntake(intake);
+      }
+    };
+    loadWaterIntake();
   }, [user, date]);
   
   // Calculate total nutrition values
@@ -152,41 +168,103 @@ export default function NutritionPage() {
     setSavingTargets(true);
     try {
       if (!user) throw new Error('No user');
-      const success = await updateNutritionTargets(data, user.id);
-      if (success) {
-        const latest = await getNutritionTargets(user.id);
-        setTargetNutrition(latest || DEFAULT_TARGETS);
-        setIsPersonalizationOpen(false);
-      } else {
+      const formattedDate = date.toISOString().split('T')[0];
+      
+      // Save the targets
+      const success = await updateNutritionTargets(data, user.id, formattedDate);
+      if (!success) {
         throw new Error('Failed to save targets');
       }
+
+      // Force a refresh of the data
+      setLoading(true);
+      const latest = await getNutritionTargets(user.id, formattedDate);
+      console.log('Latest targets after save:', latest);
+      
+      if (latest) {
+        setTargetNutrition(latest);
+      } else {
+        setTargetNutrition(data); // Fallback to the data we just saved
+      }
+      
+      setIsPersonalizationOpen(false);
     } catch (error) {
       console.error('Error saving targets:', error);
     } finally {
+      setLoading(false);
       setSavingTargets(false);
     }
   };
 
-  const handleAddMeal = async (data: any) => {
-    console.log('Main page: handleAddMeal called', data);
+  // Add a function to refresh targets
+  const refreshTargets = async () => {
     if (!user) return;
-    // Map AddMealModal data to backend fields
-    const meal = {
-      meal_type: data.name || 'Meal',
-      description: data.description || '',
-      calories: data.calories,
-      protein: data.protein,
-      carbs: data.carbs,
-      fat: data.fat,
-      user_id: user.id,
-    };
-    const success = await saveMealToBackend(meal);
-    if (success) {
-      const formattedDate = date.toISOString().split('T')[0];
-      const logs = await getNutritionLogs(formattedDate);
-      setNutritionLogs(logs);
+    const formattedDate = date.toISOString().split('T')[0];
+    const targets = await getNutritionTargets(user.id, formattedDate);
+    if (targets) {
+      setTargetNutrition(targets);
     }
-    setIsAddMealOpen(false);
+  };
+
+  // Centralized function to refresh meals
+  const refreshMeals = async () => {
+    if (!user) return;
+    setLoading(true); // Show loading state
+    try {
+      const formattedDate = date.toISOString().split('T')[0];
+      // Force fetch from backend, bypass cache
+      const logs = await getNutritionLogs(formattedDate, false /* includeDeleted */, true /* forceFetch */);
+      setNutritionLogs(logs);
+    } catch (error) {
+      console.error('Error refreshing meals:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleAddMeal = async (data: any) => {
+    if (!user) return;
+    setLoading(true);
+    try {
+      const meal = {
+        meal_type: data.name || 'Meal',
+        description: data.description || '',
+        calories: data.calories,
+        protein: data.protein,
+        carbs: data.carbs,
+        fat: data.fat,
+        user_id: user.id,
+      };
+      const success = await saveMealToBackend(meal);
+      if (success) {
+        // Optimistically add the meal to the state
+        setNutritionLogs(prev => [
+          {
+            id: Math.random().toString(36).substr(2, 9), // Temporary ID
+            user_id: user.id,
+            date: date.toISOString().split('T')[0],
+            meal_type: meal.meal_type,
+            food_item: '',
+            calories: meal.calories,
+            protein: meal.protein,
+            carbs: meal.carbs,
+            fats: meal.fat,
+            is_deleted: false,
+            notes: meal.description,
+            meal_time: new Date().toTimeString().slice(0, 8),
+            protein_g: meal.protein,
+            carbs_g: meal.carbs,
+            fat_g: meal.fat,
+          },
+          ...prev,
+        ]);
+        setIsAddMealOpen(false);
+      }
+    } catch (error) {
+      console.error('Error adding meal:', error);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const openCopyMealModal = async () => {
@@ -215,8 +293,7 @@ export default function NutritionPage() {
       time: now,
     });
     if (success) {
-      const logs = await getNutritionLogs(today);
-      setNutritionLogs(logs);
+      await refreshMeals();
     }
     setIsCopyMealOpen(false);
   };
@@ -228,20 +305,69 @@ export default function NutritionPage() {
 
   const handleSaveEditMeal = async (data: any) => {
     if (!editMealData) return;
-    const updates = {
-      meal_type: data.name || editMealData.meal_type,
-      description: data.description || editMealData.notes || '',
-      calories: data.calories,
-      protein: data.protein,
-      carbs: data.carbs,
-      fat: data.fat,
-    };
-    await updateMealInBackend(editMealData.id, updates);
+    setLoading(true);
+    try {
+      const updates = {
+        meal_type: data.name || editMealData.meal_type,
+        description: data.description || editMealData.notes || '',
+        calories: data.calories,
+        protein: data.protein,
+        carbs: data.carbs,
+        fat: data.fat,
+      };
+      await updateMealInBackend(editMealData.id, updates);
+      // Optimistically update the meal in the state
+      setNutritionLogs(prev => prev.map(log =>
+        log.id === editMealData.id
+          ? {
+              ...log,
+              meal_type: updates.meal_type,
+              notes: updates.description,
+              calories: updates.calories,
+              protein: updates.protein,
+              carbs: updates.carbs,
+              fats: updates.fat,
+              protein_g: updates.protein,
+              carbs_g: updates.carbs,
+              fat_g: updates.fat,
+            }
+          : log
+      ));
+      setIsEditMealOpen(false);
+      setEditMealData(null);
+    } catch (error) {
+      console.error('Error saving meal edit:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleWaterIntakeChange = async (value: number) => {
+    if (!user) return;
+    setWaterIntake(value);
     const formattedDate = date.toISOString().split('T')[0];
-    const logs = await getNutritionLogs(formattedDate);
-    setNutritionLogs(logs);
-    setIsEditMealOpen(false);
-    setEditMealData(null);
+    await updateWaterIntake(user.id, formattedDate, value);
+  };
+
+  const handleWaterInputChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!user) return;
+    const value = Math.min(Math.max(0, Number(e.target.value)), targetNutrition.targetWater);
+    setWaterIntake(value);
+    const formattedDate = date.toISOString().split('T')[0];
+    await updateWaterIntake(user.id, formattedDate, value);
+  };
+
+  const handleDeleteMeal = async (mealId: string) => {
+    setLoading(true);
+    try {
+      await softDeleteMeal(mealId);
+      // Optimistically remove the meal from the state
+      setNutritionLogs(prev => prev.filter(log => log.id !== mealId));
+    } catch (error) {
+      console.error('Error deleting meal:', error);
+    } finally {
+      setLoading(false);
+    }
   };
   
   if (userLoading || !user) {
@@ -279,6 +405,9 @@ export default function NutritionPage() {
                 <span>Calories</span>
                 <span>{calculatePercentage(totals.calories, targetNutrition.targetCalories)}%</span>
               </div>
+              <div className="flex justify-end text-xs text-text-light mb-1">
+                <span>{totals.calories} / {targetNutrition.targetCalories} kcal</span>
+              </div>
               <div className="w-full bg-background rounded-full h-2">
                 <div 
                   className="bg-accent h-2 rounded-full" 
@@ -314,16 +443,43 @@ export default function NutritionPage() {
               </div>
             </div>
             
-            <div>
+            <div className="mt-4">
               <div className="flex justify-between text-sm mb-1">
                 <span>Water</span>
-                <span>0 / {targetNutrition.targetWater} ml</span>
+                <div className="flex items-center gap-2">
+                  {isEditingWater ? (
+                    <input
+                      type="number"
+                      value={waterIntake}
+                      onChange={handleWaterInputChange}
+                      onBlur={() => setIsEditingWater(false)}
+                      className="w-20 p-1 bg-background rounded text-right"
+                      min={0}
+                      max={targetNutrition.targetWater}
+                    />
+                  ) : (
+                    <span onClick={() => setIsEditingWater(true)} className="cursor-pointer">
+                      {waterIntake} / {targetNutrition.targetWater} ml
+                    </span>
+                  )}
+                </div>
               </div>
-              <div className="w-full bg-background rounded-full h-2">
-                <div 
-                  className="bg-blue-400 h-2 rounded-full" 
-                  style={{ width: `0%` }}
-                ></div>
+              <div className="relative">
+                <input
+                  type="range"
+                  min={0}
+                  max={targetNutrition.targetWater}
+                  value={waterIntake}
+                  onChange={(e) => handleWaterIntakeChange(Number(e.target.value))}
+                  className="w-full h-2 bg-background rounded-full appearance-none cursor-pointer"
+                  style={{
+                    background: `linear-gradient(to right, #60A5FA ${(waterIntake / targetNutrition.targetWater) * 100}%, #2A3035 ${(waterIntake / targetNutrition.targetWater) * 100}%)`
+                  }}
+                />
+                <div className="absolute -bottom-6 left-0 right-0 flex justify-between text-xs text-text-light">
+                  <span>0ml</span>
+                  <span>{targetNutrition.targetWater}ml</span>
+                </div>
               </div>
             </div>
           </div>
@@ -356,10 +512,22 @@ export default function NutritionPage() {
                             <div>{displayItem.notes}</div>
                             <div className="text-text-light">{displayItem.calories} cal</div>
                             <button
-                              className="ml-2 text-accent text-xs underline"
+                              className="ml-2 p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700"
+                              title="Edit"
                               onClick={() => handleEditMeal(displayItem)}
                             >
-                              Edit
+                              <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4 text-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536M9 13l6-6m2 2l-6 6m-2 2h6" />
+                              </svg>
+                            </button>
+                            <button
+                              className="ml-2 p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700"
+                              title="Delete"
+                              onClick={() => handleDeleteMeal(displayItem.id)}
+                            >
+                              <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                              </svg>
                             </button>
                           </div>
                           <div className="text-xs text-text-light flex justify-between">

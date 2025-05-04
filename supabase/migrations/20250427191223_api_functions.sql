@@ -2,8 +2,8 @@
 
 -- Function to register a new user
 CREATE OR REPLACE FUNCTION register_user(
+  p_id UUID,
   p_email TEXT,
-  p_password TEXT,
   p_full_name TEXT,
   p_username TEXT DEFAULT NULL
 ) RETURNS UUID
@@ -14,14 +14,14 @@ DECLARE
   v_user_id UUID;
 BEGIN
   INSERT INTO users (
+    id,
     email, 
-    password, 
     full_name, 
     username
   )
   VALUES (
+    p_id,
     p_email, 
-    crypt(p_password, gen_salt('bf')), 
     p_full_name, 
     p_username
   )

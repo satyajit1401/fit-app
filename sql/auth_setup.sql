@@ -20,16 +20,25 @@ CREATE TABLE IF NOT EXISTS public.users (
 -- Enable Row Level Security
 ALTER TABLE public.users ENABLE ROW LEVEL SECURITY;
 
+-- Drop existing policy if it exists
+DROP POLICY IF EXISTS users_policy ON public.users;
+
 -- Create policy to allow users to read/update their own data
 CREATE POLICY users_policy ON public.users
   USING (id = auth.uid() OR id::text = current_setting('request.jwt.claims', true)::json->>'sub');
+
+-- Drop existing functions if they exist
+DROP FUNCTION IF EXISTS public.register_user(TEXT, TEXT, TEXT, TEXT, UUID);
+DROP FUNCTION IF EXISTS public.authenticate_user(TEXT, TEXT);
+DROP FUNCTION IF EXISTS public.get_user_profile(UUID);
 
 -- Function to register a user
 CREATE OR REPLACE FUNCTION public.register_user(
   p_email TEXT,
   p_password TEXT,
   p_full_name TEXT,
-  p_username TEXT DEFAULT NULL
+  p_username TEXT DEFAULT NULL,
+  p_user_id UUID DEFAULT NULL
 ) RETURNS UUID AS $$
 DECLARE
   v_user_id UUID;
@@ -44,9 +53,10 @@ BEGIN
     RAISE EXCEPTION 'Username already taken';
   END IF;
   
-  -- Insert new user
-  INSERT INTO public.users (email, password_hash, full_name, username)
+  -- Insert new user with provided ID or generate new one
+  INSERT INTO public.users (id, email, password_hash, full_name, username)
   VALUES (
+    COALESCE(p_user_id, gen_random_uuid()),
     p_email,
     crypt(p_password, gen_salt('bf')),
     p_full_name,

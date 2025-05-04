@@ -25,8 +25,16 @@ interface MealData {
 export default function AddMealModal({ isOpen, onClose, onSave, targetValues, initialData }: AddMealModalProps) {
   const [mealName, setMealName] = useState('');
   const [mealDescription, setMealDescription] = useState('');
-  const [macros, setMacros] = useState<MealData | null>(null);
+  const [macros, setMacros] = useState<MealData>({
+    name: '',
+    description: '',
+    calories: 0,
+    protein: 0,
+    carbs: 0,
+    fat: 0
+  });
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   // Debug log for target values
   useEffect(() => {
@@ -42,27 +50,33 @@ export default function AddMealModal({ isOpen, onClose, onSave, targetValues, in
         setMealName(initialData.name || '');
         setMealDescription(initialData.description || '');
         setMacros({
-          calories: initialData.calories,
-          protein: initialData.protein,
-          carbs: initialData.carbs,
-          fat: initialData.fat,
-          name: initialData.name,
-          description: initialData.description,
+          name: initialData.name || '',
+          description: initialData.description || '',
+          calories: initialData.calories || 0,
+          protein: initialData.protein || 0,
+          carbs: initialData.carbs || 0,
+          fat: initialData.fat || 0
         });
       } else {
         setMealName('');
         setMealDescription('');
-        setMacros(null);
+        setMacros({
+          name: '',
+          description: '',
+          calories: 0,
+          protein: 0,
+          carbs: 0,
+          fat: 0
+        });
       }
     }
   }, [isOpen, initialData]);
 
   const analyzeMeal = async () => {
     if (!mealDescription) return;
-    
     setIsAnalyzing(true);
+    setError(null);
     try {
-      // This would be replaced with actual LLM API call
       const response = await fetch('/api/analyze-meal', {
         method: 'POST',
         headers: {
@@ -70,10 +84,21 @@ export default function AddMealModal({ isOpen, onClose, onSave, targetValues, in
         },
         body: JSON.stringify({ description: mealDescription }),
       });
-      
       const data = await response.json();
-      setMacros(data);
+      if (data.error) {
+        setError(data.error);
+        return;
+      }
+      setMacros({
+        name: mealName,
+        description: mealDescription,
+        calories: data.calories || 0,
+        protein: data.protein || 0,
+        carbs: data.carbs || 0,
+        fat: data.fat || 0
+      });
     } catch (error) {
+      setError('Could not analyze meal. Please try again.');
       console.error('Error analyzing meal:', error);
     } finally {
       setIsAnalyzing(false);
@@ -117,7 +142,10 @@ export default function AddMealModal({ isOpen, onClose, onSave, targetValues, in
               <input
                 type="text"
                 value={mealName}
-                onChange={(e) => setMealName(e.target.value)}
+                onChange={(e) => {
+                  setMealName(e.target.value);
+                  setMacros(prev => ({ ...prev, name: e.target.value }));
+                }}
                 placeholder="e.g., Breakfast, Lunch, Snack"
                 className="w-full p-3 bg-background rounded-lg"
               />
@@ -126,7 +154,10 @@ export default function AddMealModal({ isOpen, onClose, onSave, targetValues, in
               <label className="block text-sm text-text-light mb-1">Meal Description</label>
               <textarea
                 value={mealDescription}
-                onChange={(e) => setMealDescription(e.target.value)}
+                onChange={(e) => {
+                  setMealDescription(e.target.value);
+                  setMacros(prev => ({ ...prev, description: e.target.value }));
+                }}
                 placeholder="Describe your meal in detail..."
                 className="w-full p-3 bg-background rounded-lg h-32"
               />
@@ -134,53 +165,62 @@ export default function AddMealModal({ isOpen, onClose, onSave, targetValues, in
             <button
               onClick={analyzeMeal}
               disabled={isAnalyzing || !mealDescription}
-              className="w-full p-4 bg-accent text-white rounded-lg font-medium disabled:opacity-50"
+              className="w-full p-4 bg-accent text-white rounded-lg font-medium disabled:opacity-50 flex items-center justify-center"
             >
-              {isAnalyzing ? 'Analyzing...' : 'Analyze Meal'}
+              {isAnalyzing ? (
+                <>
+                  <svg className="animate-spin h-5 w-5 mr-2 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"></path>
+                  </svg>
+                  Analyzing...
+                </>
+              ) : 'Analyze Meal'}
             </button>
-            {macros && (
-              <div className="bg-background rounded-lg p-4 space-y-2">
-                <h3 className="font-medium">Estimated Macros</h3>
-                <div className="grid grid-cols-2 gap-2">
-                  <div>
-                    <span className="text-text-light">Calories:</span>
-                    <input
-                      type="number"
-                      value={macros.calories}
-                      onChange={(e) => setMacros(prev => prev ? { ...prev, calories: Number(e.target.value) } : null)}
-                      className="w-full p-2 bg-card rounded mt-1"
-                    />
-                  </div>
-                  <div>
-                    <span className="text-text-light">Protein (g):</span>
-                    <input
-                      type="number"
-                      value={macros.protein}
-                      onChange={(e) => setMacros(prev => prev ? { ...prev, protein: Number(e.target.value) } : null)}
-                      className="w-full p-2 bg-card rounded mt-1"
-                    />
-                  </div>
-                  <div>
-                    <span className="text-text-light">Carbs (g):</span>
-                    <input
-                      type="number"
-                      value={macros.carbs}
-                      onChange={(e) => setMacros(prev => prev ? { ...prev, carbs: Number(e.target.value) } : null)}
-                      className="w-full p-2 bg-card rounded mt-1"
-                    />
-                  </div>
-                  <div>
-                    <span className="text-text-light">Fat (g):</span>
-                    <input
-                      type="number"
-                      value={macros.fat}
-                      onChange={(e) => setMacros(prev => prev ? { ...prev, fat: Number(e.target.value) } : null)}
-                      className="w-full p-2 bg-card rounded mt-1"
-                    />
-                  </div>
+            {error && (
+              <div className="text-red-500 text-sm mt-2 text-center">{error}</div>
+            )}
+            <div className="bg-background rounded-lg p-4 space-y-2">
+              <h3 className="font-medium">Estimated Macros</h3>
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <span className="text-text-light">Calories:</span>
+                  <input
+                    type="number"
+                    value={macros.calories}
+                    onChange={(e) => setMacros(prev => ({ ...prev, calories: Number(e.target.value) }))}
+                    className="w-full p-2 bg-card rounded mt-1"
+                  />
+                </div>
+                <div>
+                  <span className="text-text-light">Protein (g):</span>
+                  <input
+                    type="number"
+                    value={macros.protein}
+                    onChange={(e) => setMacros(prev => ({ ...prev, protein: Number(e.target.value) }))}
+                    className="w-full p-2 bg-card rounded mt-1"
+                  />
+                </div>
+                <div>
+                  <span className="text-text-light">Carbs (g):</span>
+                  <input
+                    type="number"
+                    value={macros.carbs}
+                    onChange={(e) => setMacros(prev => ({ ...prev, carbs: Number(e.target.value) }))}
+                    className="w-full p-2 bg-card rounded mt-1"
+                  />
+                </div>
+                <div>
+                  <span className="text-text-light">Fat (g):</span>
+                  <input
+                    type="number"
+                    value={macros.fat}
+                    onChange={(e) => setMacros(prev => ({ ...prev, fat: Number(e.target.value) }))}
+                    className="w-full p-2 bg-card rounded mt-1"
+                  />
                 </div>
               </div>
-            )}
+            </div>
           </div>
         </div>
         {/* Fixed footer for buttons */}
@@ -193,14 +233,24 @@ export default function AddMealModal({ isOpen, onClose, onSave, targetValues, in
           </button>
           <button
             onClick={() => {
-              console.log('AddMealModal: Save clicked');
-              if (macros) onSave({
+              console.log('AddMealModal: Save clicked with data:', {
+                ...macros,
+                name: mealName,
+                description: mealDescription
+              });
+              onSave({
                 ...macros,
                 name: mealName,
                 description: mealDescription
               });
             }}
-            disabled={!macros}
+            disabled={
+              mealName.trim() === '' ||
+              macros.calories === null || macros.calories === undefined ||
+              macros.protein === null || macros.protein === undefined ||
+              macros.carbs === null || macros.carbs === undefined ||
+              macros.fat === null || macros.fat === undefined
+            }
             className="flex-1 p-3 bg-accent text-white rounded-lg font-medium disabled:opacity-50"
           >
             Save Meal

@@ -7,7 +7,8 @@ import {
   signUp as supabaseSignUp, 
   signOut as supabaseSignOut,
   getCurrentUser,
-  getUserProfile 
+  getUserProfile,
+  completeRegistrationAfterConfirmation
 } from './supabase';
 import { useRouter } from 'next/navigation';
 import { getWorkouts, getExercises, getWorkoutExercises } from './api';
@@ -25,7 +26,12 @@ type AuthContextType = {
   profile: any | null;
   loading: boolean;
   signIn: (email: string, password: string) => Promise<{ success: boolean; error?: any }>;
-  signUp: (email: string, password: string, fullName: string, username?: string) => Promise<{ success: boolean; error?: any }>;
+  signUp: (
+    email: string,
+    password: string,
+    fullName: string,
+    username?: string
+  ) => Promise<{ success: boolean; error?: any; confirmationSent?: boolean }>;
   signOut: () => Promise<void>;
   refreshProfile: () => Promise<void>;
 };
@@ -95,6 +101,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             username: currentUser.user_metadata?.username
           };
           setUser(userObj);
+
+          // Try to complete registration if needed
+          const { success } = await completeRegistrationAfterConfirmation(currentUser.id, currentUser.email || '');
+          if (success) {
+            // Registration completed, you may want to show a welcome message
+          }
+
           await upsertUser(userObj);
           
           // Fetch user profile data
@@ -149,7 +162,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const signIn = async (email: string, password: string) => {
     try {
       setLoading(true);
-      const { data, error, userData } = await supabaseSignIn(email, password);
+      const { data, error } = await supabaseSignIn(email, password);
       
       if (error) {
         return { success: false, error };
@@ -159,8 +172,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setUser({
           id: data.user.id,
           email: data.user.email || '',
-          fullName: data.user.user_metadata?.full_name || (userData?.full_name),
-          username: data.user.user_metadata?.username || (userData?.username)
+          fullName: data.user.user_metadata?.full_name,
+          username: data.user.user_metadata?.username
         });
         
         // Fetch user profile after sign in
@@ -186,19 +199,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       setLoading(true);
       const { data, error } = await supabaseSignUp(email, password, fullName, username);
-      
+
       if (error) {
-        return { success: false, error };
+        return { success: false, error, confirmationSent: false };
       }
-      
-      if (data?.user) {
+
+      // If data is null or user is null, confirmation email was sent
+      if (!data || !data.user) {
+        return { success: true, confirmationSent: true };
+      }
+
+      if (data.user) {
         router.push('/auth/confirm');
-        return { success: true };
+        return { success: true, confirmationSent: false };
       }
-      
-      return { success: false, error: new Error('Unknown error during sign up') };
+
+      return { success: false, error: new Error('Unknown error during sign up'), confirmationSent: false };
     } catch (error) {
-      return { success: false, error };
+      return { success: false, error, confirmationSent: false };
     } finally {
       setLoading(false);
     }
@@ -251,4 +269,16 @@ export function useAuth() {
     throw new Error('useAuth must be used within an AuthProvider');
   }
   return context;
+}
+
+export async function signUp(email: string, password: string, fullName: string) {
+  // 1. Sign up with Supabase Auth
+  const { data, error } = await supabase.auth.signUp({
+    email,
+    password,
+  });
+  if (error || !data || !data.user) return { success: false, error, confirmationSent: false };
+
+  // Do NOT insert into users table here. Only insert after confirmation/login.
+  return { success: true, confirmationSent: false };
 } 
