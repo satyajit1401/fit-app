@@ -7,6 +7,7 @@ import { getNutritionLogs, NutritionLog, getNutritionTargets, updateNutritionTar
 import DateNavigation from '@/components/nutrition/DateNavigation';
 import PersonalizationModal from '@/components/nutrition/PersonalizationModal';
 import AddMealModal from '@/components/nutrition/AddMealModal';
+import { useNutritionData } from '@/lib/NutritionDataContext';
 
 interface MealGroup {
   name: string;
@@ -64,6 +65,8 @@ export default function NutritionPage() {
   const [isEditMealOpen, setIsEditMealOpen] = useState(false);
   const [editMealData, setEditMealData] = useState<NutritionLogDisplay | null>(null);
   
+  const { signalNutritionDataChanged } = useNutritionData();
+  
   // Load saved targets from database on component mount or date change
   useEffect(() => {
     const loadTargets = async () => {
@@ -112,6 +115,7 @@ export default function NutritionPage() {
       if (user) {
         const formattedDate = date.toISOString().split('T')[0];
         const intake = await getWaterIntake(user.id, formattedDate);
+        console.log('[NUTRITION] getWaterIntake:', { userId: user.id, formattedDate, intake });
         setWaterIntake(intake);
       }
     };
@@ -188,6 +192,7 @@ export default function NutritionPage() {
       }
       
       setIsPersonalizationOpen(false);
+      signalNutritionDataChanged();
     } catch (error) {
       console.error('Error saving targets:', error);
     } finally {
@@ -259,6 +264,7 @@ export default function NutritionPage() {
           ...prev,
         ]);
         setIsAddMealOpen(false);
+        signalNutritionDataChanged();
       }
     } catch (error) {
       console.error('Error adding meal:', error);
@@ -335,6 +341,7 @@ export default function NutritionPage() {
       ));
       setIsEditMealOpen(false);
       setEditMealData(null);
+      signalNutritionDataChanged();
     } catch (error) {
       console.error('Error saving meal edit:', error);
     } finally {
@@ -347,6 +354,7 @@ export default function NutritionPage() {
     setWaterIntake(value);
     const formattedDate = date.toISOString().split('T')[0];
     await updateWaterIntake(user.id, formattedDate, value);
+    signalNutritionDataChanged();
   };
 
   const handleWaterInputChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -363,6 +371,9 @@ export default function NutritionPage() {
       await softDeleteMeal(mealId);
       // Optimistically remove the meal from the state
       setNutritionLogs(prev => prev.filter(log => log.id !== mealId));
+      // Always refresh from backend to ensure deleted items are not shown
+      await refreshMeals();
+      signalNutritionDataChanged();
     } catch (error) {
       console.error('Error deleting meal:', error);
     } finally {
@@ -420,7 +431,7 @@ export default function NutritionPage() {
               <div className="bg-background rounded-lg p-3 text-center">
                 <div className="text-xs text-text-light mb-1">Protein</div>
                 <div className="font-medium">
-                  <span className="text-accent">{formatMacro(totals.protein)}</span>
+                  <span className={totals.protein > targetNutrition.targetProtein ? 'text-red-500' : 'text-accent'}>{formatMacro(totals.protein)}</span>
                   {' / '}
                   {formatMacro(targetNutrition.targetProtein)}
                 </div>
@@ -428,7 +439,7 @@ export default function NutritionPage() {
               <div className="bg-background rounded-lg p-3 text-center">
                 <div className="text-xs text-text-light mb-1">Carbs</div>
                 <div className="font-medium">
-                  <span className="text-accent">{formatMacro(totals.carbs)}</span>
+                  <span className={totals.carbs > targetNutrition.targetCarbs ? 'text-red-500' : 'text-accent'}>{formatMacro(totals.carbs)}</span>
                   {' / '}
                   {formatMacro(targetNutrition.targetCarbs)}
                 </div>
@@ -436,7 +447,7 @@ export default function NutritionPage() {
               <div className="bg-background rounded-lg p-3 text-center">
                 <div className="text-xs text-text-light mb-1">Fat</div>
                 <div className="font-medium">
-                  <span className="text-accent">{formatMacro(totals.fat)}</span>
+                  <span className={totals.fat > targetNutrition.targetFat ? 'text-red-500' : 'text-accent'}>{formatMacro(totals.fat)}</span>
                   {' / '}
                   {formatMacro(targetNutrition.targetFat)}
                 </div>
@@ -492,8 +503,7 @@ export default function NutritionPage() {
                 <div key={index} className="card">
                   <div className="p-4 border-b border-gray-700 flex justify-between items-center">
                     <div>
-                      <h4 className="font-medium">{meal.name}</h4>
-                      <div className="text-text-light text-sm">{meal.time}</div>
+                      <h4 className="font-bold text-lg">{meal.name}</h4>
                     </div>
                     <div className="text-right">
                       <div className="font-medium">{meal.calories} cal</div>
@@ -507,32 +517,40 @@ export default function NutritionPage() {
                     {meal.items.map((item, itemIndex) => {
                       const displayItem = item as NutritionLogDisplay;
                       return (
-                        <div key={itemIndex} className="flex flex-col py-2 border-b border-gray-700 last:border-0">
-                          <div className="flex justify-between">
-                            <div>{displayItem.notes}</div>
-                            <div className="text-text-light">{displayItem.calories} cal</div>
+                        <div key={itemIndex} className="flex items-center justify-between gap-2 py-2 border-b border-gray-700 last:border-0">
+                          <div className="flex-1 flex flex-col">
+                            <div className="font-medium">{displayItem.notes}</div>
+                            {displayItem.meal_time && (
+                              <div className="text-xs text-text-light">
+                                {(() => {
+                                  const [h, m] = (displayItem.meal_time || '').split(":");
+                                  return `${h?.padStart(2, '0') ?? '--'}:${m?.padStart(2, '0') ?? '--'}`;
+                                })()}
+                              </div>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-2 min-w-[120px] justify-end">
+                            <span className="text-text-light">{displayItem.calories} cal</span>
                             <button
-                              className="ml-2 p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700"
+                              className="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700"
                               title="Edit"
                               onClick={() => handleEditMeal(displayItem)}
                             >
-                              <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4 text-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536M9 13l6-6m2 2l-6 6m-2 2h6" />
+                              {/* Heroicons Pencil (Outline) */}
+                              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5 text-accent">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487a2.1 2.1 0 1 1 2.97 2.97L7.5 19.789l-4 1 1-4 13.362-13.302z" />
                               </svg>
                             </button>
                             <button
-                              className="ml-2 p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700"
+                              className="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700"
                               title="Delete"
                               onClick={() => handleDeleteMeal(displayItem.id)}
                             >
-                              <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                              {/* Heroicons Trash (Outline) */}
+                              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5 text-red-500">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18.75V7.5m12 11.25V7.5m-9.75 0V5.25A2.25 2.25 0 0 1 10.5 3h3a2.25 2.25 0 0 1 2.25 2.25V7.5m-9.75 0h13.5m-13.5 0a.75.75 0 0 0-.75.75v.75a.75.75 0 0 0 .75.75h13.5a.75.75 0 0 0 .75-.75v-.75a.75.75 0 0 0-.75-.75" />
                               </svg>
                             </button>
-                          </div>
-                          <div className="text-xs text-text-light flex justify-between">
-                            <span>Time: {displayItem.meal_time || '--:--'}</span>
-                            <span>P: {(displayItem.protein ?? displayItem.protein_g ?? 0).toFixed(0)}g · C: {(displayItem.carbs ?? displayItem.carbs_g ?? 0).toFixed(0)}g · F: {(displayItem.fats ?? displayItem.fat_g ?? 0).toFixed(0)}g</span>
                           </div>
                         </div>
                       );

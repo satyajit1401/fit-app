@@ -198,12 +198,16 @@ export default function PersonalizationModal({ isOpen, onClose, onSave, initialD
         throw new Error(data.error);
       }
 
+      const calculatedCalories = data.targetCalories;
+      const macros = calculateMacrosFromCalories(calculatedCalories, goal);
+
       setFormData(prev => ({
         ...prev,
-        targetCalories: data.targetCalories.toString(),
-        targetProtein: data.targetProtein.toString(),
-        targetCarbs: data.targetCarbs.toString(),
-        targetFat: data.targetFat.toString(),
+        targetCalories: calculatedCalories.toString(),
+        targetProtein: macros.protein.toString(),
+        targetCarbs: macros.carbs.toString(),
+        targetFat: macros.fat.toString(),
+        targetWater: prev.targetWater && Number(prev.targetWater) > 0 ? prev.targetWater : '3000',
         weeklyWeightTargets: data.weeklyWeightTargets,
         goal: goal
       }));
@@ -391,6 +395,17 @@ export default function PersonalizationModal({ isOpen, onClose, onSave, initialD
                     <div>
                       <span className="text-text-light">Fat:</span>
                       <div className="font-medium">{formData.targetFat}g</div>
+                    </div>
+                    <div className="col-span-2">
+                      <label className="block text-sm text-text-light mb-1">Water (ml)</label>
+                      <input
+                        type="number"
+                        value={formData.targetWater}
+                        onChange={e => setFormData(prev => ({ ...prev, targetWater: e.target.value }))}
+                        min={100}
+                        step={100}
+                        className="w-full p-3 bg-background rounded-lg"
+                      />
                     </div>
                   </div>
                 </div>

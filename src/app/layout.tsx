@@ -3,6 +3,7 @@ import { Inter } from 'next/font/google';
 import './globals.css';
 import { AuthProvider } from '@/lib/auth-context';
 import CacheManager from '@/components/CacheManager';
+import { NutritionDataProvider } from '@/lib/NutritionDataContext';
 
 const inter = Inter({ subsets: ['latin'] });
 
@@ -21,7 +22,9 @@ export default function RootLayout({
       <body className={inter.className}>
         <AuthProvider>
           <CacheManager />
-          {children}
+          <NutritionDataProvider>
+            {children}
+          </NutritionDataProvider>
         </AuthProvider>
       </body>
     </html>
