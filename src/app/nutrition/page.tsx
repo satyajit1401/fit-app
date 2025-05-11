@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import Layout from '@/components/layout/Layout';
 import { useAuth } from '@/lib/auth-context';
 import { getNutritionLogs, NutritionLog, getNutritionTargets, updateNutritionTargets, saveMealToBackend, getAllPastMeals, updateMealInBackend, getWaterIntake, updateWaterIntake, softDeleteMeal } from '@/lib/api';
@@ -66,6 +66,8 @@ export default function NutritionPage() {
   const [editMealData, setEditMealData] = useState<NutritionLogDisplay | null>(null);
   
   const { signalNutritionDataChanged } = useNutritionData();
+  
+  const debounceTimeout = useRef<NodeJS.Timeout | null>(null);
   
   // Load saved targets from database on component mount or date change
   useEffect(() => {
@@ -349,12 +351,17 @@ export default function NutritionPage() {
     }
   };
 
-  const handleWaterIntakeChange = async (value: number) => {
+  const handleWaterIntakeChange = (value: number) => {
     if (!user) return;
     setWaterIntake(value);
-    const formattedDate = date.toISOString().split('T')[0];
-    await updateWaterIntake(user.id, formattedDate, value);
-    signalNutritionDataChanged();
+    if (debounceTimeout.current) {
+      clearTimeout(debounceTimeout.current);
+    }
+    debounceTimeout.current = setTimeout(async () => {
+      const formattedDate = date.toISOString().split('T')[0];
+      await updateWaterIntake(user.id, formattedDate, value);
+      signalNutritionDataChanged();
+    }, 500); // 500ms debounce
   };
 
   const handleWaterInputChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
