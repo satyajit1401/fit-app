@@ -1,10 +1,15 @@
 import { createClient } from '@supabase/supabase-js';
-import { prewarmCache, resetCacheInitialization } from './cache';
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
+// Validate environment variables
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+// Check if environment variables are set
+if (!supabaseUrl || !supabaseAnonKey) {
+  console.error('Missing Supabase environment variables. Please check your .env.local file.');
+}
+
+export const supabase = createClient(supabaseUrl || '', supabaseAnonKey || '');
 
 // Auth helper functions
 export const signUp = async (email: string, password: string, fullName: string, username?: string) => {
@@ -22,22 +27,17 @@ export const signUp = async (email: string, password: string, fullName: string, 
     });
     
     if (authError) throw authError;
-    if (!authData.user) throw new Error('No user data returned from auth signup');
-
-    // Store the password and registration info temporarily for use after confirmation
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('pending_registration', JSON.stringify({
-        email,
-        password,
-        fullName,
-        username
-      }));
-    }
     
-    // Return confirmation state
-    return { data: authData, error: null, confirmationSent: true };
+    // Check if email confirmation is enabled based on session data
+    const confirmationSent = !authData.session;
+    
+    return { 
+      data: authData, 
+      error: null, 
+      confirmationSent 
+    };
   } catch (error) {
-    return { data: null, error };
+    return { data: null, error, confirmationSent: false };
   }
 };
 
@@ -75,33 +75,39 @@ export const signIn = async (email: string, password: string) => {
     });
 
     if (error) {
-      return { data: null, error, userData: null };
+      return { data: null, error };
     }
 
-    // Prewarm cache with initial data if login is successful
-    if (data.user) {
-      prewarmCache(data.user.id);
-    }
-
-    return { data, error: null, userData: null };
+    return { data, error: null };
   } catch (error) {
-    return { data: null, error, userData: null };
+    return { data: null, error };
   }
 };
 
 export const signOut = async () => {
-  // Reset cache initialization flag before signing out
-  resetCacheInitialization();
   return await supabase.auth.signOut();
 };
 
 export const getCurrentUser = async () => {
-  const { data } = await supabase.auth.getUser();
-  return data?.user || null;
+  try {
+    const { data, error } = await supabase.auth.getUser();
+    if (error) {
+      console.error('Error getting current user:', error);
+      return null;
+    }
+    return data?.user || null;
+  } catch (error) {
+    console.error('Unexpected error in getCurrentUser:', error);
+    return null;
+  }
 };
 
 export const getUserProfile = async (userId: string) => {
   try {
+    if (!userId) {
+      throw new Error('User ID is required to fetch profile');
+    }
+    
     const { data, error } = await supabase.rpc(
       'get_user_profile',
       { p_user_id: userId }
@@ -110,7 +116,8 @@ export const getUserProfile = async (userId: string) => {
     if (error) throw error;
     
     return { data, error: null };
-  } catch (error) {
+  } catch (error: any) {
+    console.error('Error getting user profile:', error.message || error);
     return { data: null, error };
   }
 }; 

@@ -18,6 +18,7 @@ export interface Exercise {
   description?: string;
   equipment?: string;
   instructions?: string;
+  image_url?: string;
 }
 
 export interface WorkoutExercise {
@@ -69,178 +70,171 @@ export interface WaterIntake {
   amount: number;
 }
 
+export interface PaginationOptions {
+  page?: number;
+  pageSize?: number;
+}
+
 // Workout APIs
-export const getWorkouts = async (): Promise<Workout[]> => {
-  // Try to get from cache first
-  const cachedData = getFromCache<Workout[]>(CACHE_KEYS.WORKOUTS);
-  if (cachedData) {
-    return cachedData;
-  }
-  
-  const { data, error } = await supabase
-    .from('workouts')
-    .select('*')
-    .order('created_at', { ascending: false });
-  
-  if (error) {
-    console.error('Error fetching workouts:', error);
+export const getWorkouts = async (options?: PaginationOptions): Promise<Workout[]> => {
+  try {
+    // Try to get from cache first
+    const cachedData = getFromCache<Workout[]>(CACHE_KEYS.WORKOUTS);
+    if (cachedData && !options) {
+      return cachedData;
+    }
+    
+    let query = supabase
+      .from('workouts')
+      .select('*')
+      .order('created_at', { ascending: false });
+    
+    // Add pagination if needed
+    if (options?.page !== undefined && options?.pageSize) {
+      const from = options.page * options.pageSize;
+      const to = from + options.pageSize - 1;
+      query = query.range(from, to);
+    }
+    
+    const { data, error } = await query;
+    
+    if (error) {
+      console.error('Error fetching workouts:', error);
+      return [];
+    }
+    
+    // Only cache if no pagination is used
+    if (data && !options) {
+      saveToCache(CACHE_KEYS.WORKOUTS, data);
+    }
+    
+    return data || [];
+  } catch (error) {
+    console.error('Unexpected error in getWorkouts:', error);
     return [];
   }
-  
-  // Save to cache
-  if (data) {
-    saveToCache(CACHE_KEYS.WORKOUTS, data);
-  }
-  
-  return data || [];
 };
 
 export const getWorkoutById = async (id: string): Promise<Workout | null> => {
-  // Try to get from cache first
-  const cacheKey = `${CACHE_KEYS.WORKOUT}${id}`;
-  const cachedData = getFromCache<Workout>(cacheKey);
-  if (cachedData) {
-    return cachedData;
-  }
-  
-  const { data, error } = await supabase
-    .from('workouts')
-    .select('*')
-    .eq('id', id)
-    .single();
-  
-  if (error) {
-    console.error('Error fetching workout:', error);
+  try {
+    if (!id) {
+      console.error('Missing workout ID');
+      return null;
+    }
+    
+    // Try to get from cache first
+    const cacheKey = `${CACHE_KEYS.WORKOUT}${id}`;
+    const cachedData = getFromCache<Workout>(cacheKey);
+    if (cachedData) {
+      return cachedData;
+    }
+    
+    const { data, error } = await supabase
+      .from('workouts')
+      .select('*')
+      .eq('id', id)
+      .single();
+    
+    if (error) {
+      console.error('Error fetching workout:', error);
+      return null;
+    }
+    
+    // Save to cache
+    if (data) {
+      saveToCache(cacheKey, data);
+    }
+    
+    return data;
+  } catch (error) {
+    console.error('Unexpected error in getWorkoutById:', error);
     return null;
   }
-  
-  // Save to cache
-  if (data) {
-    saveToCache(cacheKey, data);
-  }
-  
-  return data;
 };
 
-export const getWorkoutExercises = async (workoutId: string, forceFetch: boolean = false): Promise<WorkoutExercise[]> => {
+export const getWorkoutExercises = async (workoutId: string): Promise<WorkoutExercise[]> => {
   try {
-    console.log(`[API] getWorkoutExercises for workoutId ${workoutId}, forceFetch: ${forceFetch}`);
+    if (!workoutId) {
+      console.error('Missing workout ID for exercises');
+      return [];
+    }
     
-    // Direct API request first - don't rely on cache for initial load
-    const cacheKey = `${CACHE_KEYS.WORKOUT_EXERCISES}${workoutId}`;
-    
-    // Make direct API request
-    console.log(`[API] Making direct API request for workout exercises: ${workoutId}`);
+    // Direct query with no cache dependency for better immediacy
     const { data, error } = await supabase
       .from('workout_exercises')
       .select(`
         *,
         exercise:exercise_id (*)
       `)
-      .eq('workout_id', workoutId);
+      .eq('workout_id', workoutId)
+      .order('id');
     
-    // If we get data from the API, use it and update cache
-    if (data && data.length > 0) {
-      console.log(`[API] Received ${data.length} exercises from API, updating cache`);
-      saveToCache(cacheKey, data);
-      return data;
-    }
-    
-    // If API request failed or returned empty, check cache as fallback
-    if (error || !data || data.length === 0) {
-      console.log(`[API] API request failed or empty result: ${error?.message || 'No data'}`);
-      console.log(`[API] Checking cache for workout exercises`);
-      
-      const cachedData = getFromCache<WorkoutExercise[]>(cacheKey);
-      if (cachedData && cachedData.length > 0) {
-        console.log(`[API] Returning ${cachedData.length} exercises from cache as fallback`);
-        return cachedData;
-      }
-      
-      // If we're here, both API and cache failed
-      console.log(`[API] Both API and cache failed to return workout exercises`);
+    if (error) {
+      console.error('Error fetching workout exercises:', error);
       return [];
     }
     
-    // Default return (should not reach here normally)
     return data || [];
   } catch (error) {
-    console.error(`[API] Error in getWorkoutExercises:`, error);
-    
-    // Last resort - try cache in case of exception
-    try {
-      const cacheKey = `${CACHE_KEYS.WORKOUT_EXERCISES}${workoutId}`;
-      const cachedData = getFromCache<WorkoutExercise[]>(cacheKey);
-      if (cachedData && cachedData.length > 0) {
-        console.log(`[API] Returning ${cachedData.length} exercises from cache after error`);
-        return cachedData;
-      }
-    } catch (e) {
-      console.error(`[API] Cache fallback also failed:`, e);
-    }
-    
+    console.error('Unexpected error in getWorkoutExercises:', error);
     return [];
   }
 };
 
-// Helper function to refresh workout exercises in the background
-const refreshWorkoutExercises = async (workoutId: string): Promise<void> => {
+// Get all exercises
+export const getExercises = async (): Promise<Exercise[]> => {
   try {
-    // Fetch fresh data from API
-    const { data } = await supabase
-      .from('workout_exercises')
-      .select(`
-        *,
-        exercise:exercise_id (*)
-      `)
-      .eq('workout_id', workoutId);
-    
-    // Save to cache if we have data
-    if (data) {
-      saveToCache(`${CACHE_KEYS.WORKOUT_EXERCISES}${workoutId}`, data);
+    // Try to get from cache first
+    const cachedData = getFromCache<Exercise[]>(CACHE_KEYS.EXERCISES);
+    if (cachedData) {
+      return cachedData;
     }
+    
+    const { data, error } = await supabase
+      .from('exercises')
+      .select('*')
+      .order('name');
+    
+    if (error) {
+      console.error('Error fetching exercises:', error);
+      return [];
+    }
+    
+    // Save to cache
+    if (data) {
+      saveToCache(CACHE_KEYS.EXERCISES, data);
+    }
+    
+    return data || [];
   } catch (error) {
-    console.error('Error refreshing workout exercises:', error);
+    console.error('Unexpected error in getExercises:', error);
+    return [];
   }
 };
 
 // Progress APIs
 export const getProgress = async (): Promise<Progress[]> => {
-  // Try to get from cache first
-  const cachedData = getFromCache<Progress[]>(CACHE_KEYS.PROGRESS);
-  if (cachedData) {
-    return cachedData;
-  }
-  
-  const { data, error } = await supabase
-    .from('progress')
-    .select('*')
-    .order('date', { ascending: false });
-  
-  if (error) {
-    console.error('Error fetching progress:', error);
+  try {
+    const { data, error } = await supabase
+      .from('progress')
+      .select('*')
+      .order('date', { ascending: false });
+    
+    if (error) {
+      console.error('Error fetching progress:', error);
+      return [];
+    }
+    
+    return data || [];
+  } catch (error) {
+    console.error('Error in getProgress:', error);
     return [];
   }
-  
-  // Save to cache
-  if (data) {
-    saveToCache(CACHE_KEYS.PROGRESS, data);
-  }
-  
-  return data || [];
 };
 
 // Nutrition APIs
-export const getNutritionLogs = async (date?: string, includeDeleted: boolean = false, forceFetch: boolean = false): Promise<NutritionLog[]> => {
+export const getNutritionLogs = async (date?: string, includeDeleted: boolean = false): Promise<NutritionLog[]> => {
   try {
-    const cacheKey = date ? `${CACHE_KEYS.NUTRITION_LOGS}${date}` : CACHE_KEYS.NUTRITION_LOGS;
-    if (!forceFetch) {
-      const cachedData = getFromCache<NutritionLog[]>(cacheKey);
-      if (cachedData && !includeDeleted) {
-        return cachedData.filter(log => !log.is_deleted);
-      }
-    }
-    
     // Get current user
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) {
@@ -249,34 +243,43 @@ export const getNutritionLogs = async (date?: string, includeDeleted: boolean = 
     }
     
     let query = supabase
-      .from('nutrition_log')
-      .select('*')
-      .eq('user_id', user.id)
-      .order('meal_date', { ascending: false });
+      .from('nutrition_logs')
+      .select('*');
     
     if (date) {
-      query = query.eq('meal_date', date);
+      query = query.eq('date', date);
     }
+    
     if (!includeDeleted) {
       query = query.eq('is_deleted', false);
     }
     
-    const { data, error } = await query;
+    const { data, error } = await query.order('date', { ascending: false });
     
     if (error) {
       console.error('Error fetching nutrition logs:', error);
       return [];
     }
     
-    // Save to cache
-    if (data) {
-      saveToCache(cacheKey, data);
-    }
-    
     return data || [];
   } catch (error) {
-    console.error('Unexpected error in getNutritionLogs:', error);
+    console.error('Error in getNutritionLogs:', error);
     return [];
+  }
+};
+
+// Helper function to ensure user is authenticated before making requests
+export const ensureAuthenticated = async (): Promise<string | null> => {
+  try {
+    const { data } = await supabase.auth.getUser();
+    if (!data?.user?.id) {
+      console.error('User is not authenticated');
+      return null;
+    }
+    return data.user.id;
+  } catch (error) {
+    console.error('Error checking authentication:', error);
+    return null;
   }
 };
 
@@ -517,25 +520,6 @@ export async function updateMealInBackend(id: string, updates: {
     return false;
   }
 }
-
-export const getExercises = async (): Promise<Exercise[]> => {
-  const cachedData = getFromCache<Exercise[]>(CACHE_KEYS.EXERCISES);
-  if (cachedData) {
-    return cachedData;
-  }
-  const { data, error } = await supabase
-    .from('exercises')
-    .select('*')
-    .order('name');
-  if (error) {
-    console.error('Error fetching exercises:', error);
-    return [];
-  }
-  if (data) {
-    saveToCache(CACHE_KEYS.EXERCISES, data);
-  }
-  return data || [];
-};
 
 export async function getWaterIntake(userId: string, date: string): Promise<number> {
   try {

@@ -1,7 +1,8 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useAuth } from '@/lib/auth-context';
+import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 
 export default function LoginPage() {
@@ -9,8 +10,17 @@ export default function LoginPage() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [isSuccess, setIsSuccess] = useState(false);
   
-  const { signIn } = useAuth();
+  const { signIn, user } = useAuth();
+  const router = useRouter();
+
+  // Redirect if already logged in
+  useEffect(() => {
+    if (user) {
+      router.replace('/workouts');
+    }
+  }, [user, router]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -20,7 +30,11 @@ export default function LoginPage() {
     try {
       const { success, error } = await signIn(email, password);
       
-      if (!success && error) {
+      if (success) {
+        setIsSuccess(true);
+        // Force navigation here as well for redundancy
+        router.push('/workouts');
+      } else if (error) {
         setError(error.message || 'Failed to sign in');
       }
     } catch (err: any) {
@@ -42,6 +56,12 @@ export default function LoginPage() {
           </div>
         )}
         
+        {isSuccess && (
+          <div className="bg-green-100 border-l-4 border-green-500 text-green-700 p-4 rounded mb-6">
+            <p className="font-medium">Sign in successful! Redirecting to workouts...</p>
+          </div>
+        )}
+        
         <form onSubmit={handleSubmit} className="space-y-6">
           <div>
             <label htmlFor="email" className="block text-gray-700 dark:text-gray-300 mb-2 font-medium">
@@ -53,6 +73,7 @@ export default function LoginPage() {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-black dark:text-white"
+              disabled={isLoading || isSuccess}
               required
             />
           </div>
@@ -67,16 +88,17 @@ export default function LoginPage() {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-black dark:text-white"
+              disabled={isLoading || isSuccess}
               required
             />
           </div>
           
           <button
             type="submit"
-            disabled={isLoading}
+            disabled={isLoading || isSuccess}
             className="w-full bg-blue-600 hover:bg-blue-700 text-white py-3 px-4 rounded-lg font-medium transition duration-300 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50 disabled:opacity-50"
           >
-            {isLoading ? 'Signing in...' : 'Sign In'}
+            {isLoading ? 'Signing in...' : isSuccess ? 'Success!' : 'Sign In'}
           </button>
         </form>
         
