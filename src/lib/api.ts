@@ -44,14 +44,18 @@ export interface Progress {
 export interface NutritionLog {
   id: string;
   user_id: string;
-  date: string;
   meal_type: string;
-  food_item: string;
+  food_items?: any; // jsonb
   calories: number;
-  protein?: number;
-  carbs?: number;
-  fats?: number;
-  is_deleted: boolean;
+  protein_g?: number;
+  carbs_g?: number;
+  fat_g?: number;
+  meal_date: string;
+  meal_time?: string;
+  notes?: string;
+  created_at?: string;
+  updated_at?: string;
+  is_deleted?: boolean;
 }
 
 export interface NutritionTargets {
@@ -243,18 +247,18 @@ export const getNutritionLogs = async (date?: string, includeDeleted: boolean = 
     }
     
     let query = supabase
-      .from('nutrition_logs')
+      .from('nutrition_log')
       .select('*');
     
     if (date) {
-      query = query.eq('date', date);
+      query = query.eq('meal_date', date);
     }
     
     if (!includeDeleted) {
       query = query.eq('is_deleted', false);
     }
     
-    const { data, error } = await query.order('date', { ascending: false });
+    const { data, error } = await query.order('meal_date', { ascending: false });
     
     if (error) {
       console.error('Error fetching nutrition logs:', error);
@@ -607,4 +611,27 @@ export async function softDeleteMeal(mealId: string): Promise<boolean> {
     console.error('Error soft deleting meal:', error);
     return false;
   }
+}
+
+// Add review session API helpers
+export async function saveReviewSession(userId: string, data: any) {
+  // Upsert review session for the user
+  const { error } = await supabase
+    .from('review_sessions')
+    .upsert({
+      user_id: userId,
+      data,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: 'user_id' });
+  if (error) throw error;
+}
+
+export async function getReviewSession(userId: string) {
+  const { data, error } = await supabase
+    .from('review_sessions')
+    .select('data')
+    .eq('user_id', userId)
+    .single();
+  if (error) return null;
+  return data?.data || null;
 }

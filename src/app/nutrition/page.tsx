@@ -8,6 +8,8 @@ import DateNavigation from '@/components/nutrition/DateNavigation';
 import PersonalizationModal from '@/components/nutrition/PersonalizationModal';
 import AddMealModal from '@/components/nutrition/AddMealModal';
 import { useNutritionData } from '@/lib/NutritionDataContext';
+import ReviewModal from '../../components/nutrition/ReviewModal';
+import { saveReviewSession, getReviewSession } from '../../lib/api';
 
 interface MealGroup {
   name: string;
@@ -69,6 +71,9 @@ export default function NutritionPage() {
   
   const debounceTimeout = useRef<NodeJS.Timeout | null>(null);
   
+  const [isReviewOpen, setIsReviewOpen] = useState(false);
+  const [reviewData, setReviewData] = useState<any>(null);
+  
   // Load saved targets from database on component mount or date change
   useEffect(() => {
     const loadTargets = async () => {
@@ -128,9 +133,9 @@ export default function NutritionPage() {
   const totals = nutritionLogs.reduce((acc, item) => {
     return {
       calories: acc.calories + (item.calories || 0),
-      protein: acc.protein + (item.protein ?? item.protein_g ?? 0),
-      carbs: acc.carbs + (item.carbs ?? item.carbs_g ?? 0),
-      fat: acc.fat + (item.fat_g ?? item.fats ?? 0),
+      protein: acc.protein + (item.protein_g ?? 0),
+      carbs: acc.carbs + (item.carbs_g ?? 0),
+      fat: acc.fat + (item.fat_g ?? 0),
     };
   }, { calories: 0, protein: 0, carbs: 0, fat: 0 });
   
@@ -151,9 +156,9 @@ export default function NutritionPage() {
     }
     
     acc[mealType].calories += item.calories || 0;
-    acc[mealType].protein += item.protein ?? item.protein_g ?? 0;
-    acc[mealType].carbs += item.carbs ?? item.carbs_g ?? 0;
-    acc[mealType].fat += item.fats ?? item.fat_g ?? 0;
+    acc[mealType].protein += item.protein_g ?? 0;
+    acc[mealType].carbs += item.carbs_g ?? 0;
+    acc[mealType].fat += item.fat_g ?? 0;
     acc[mealType].items.push(item);
     
     return acc;
@@ -216,11 +221,10 @@ export default function NutritionPage() {
   // Centralized function to refresh meals
   const refreshMeals = async () => {
     if (!user) return;
-    setLoading(true); // Show loading state
+    setLoading(true);
     try {
       const formattedDate = date.toISOString().split('T')[0];
-      // Force fetch from backend, bypass cache
-      const logs = await getNutritionLogs(formattedDate, false /* includeDeleted */, true /* forceFetch */);
+      const logs = await getNutritionLogs(formattedDate);
       setNutritionLogs(logs);
     } catch (error) {
       console.error('Error refreshing meals:', error);
@@ -249,7 +253,7 @@ export default function NutritionPage() {
           {
             id: Math.random().toString(36).substr(2, 9), // Temporary ID
             user_id: user.id,
-            date: date.toISOString().split('T')[0],
+            meal_date: date.toISOString().split('T')[0],
             meal_type: meal.meal_type,
             food_item: '',
             calories: meal.calories,
@@ -388,6 +392,29 @@ export default function NutritionPage() {
     }
   };
   
+  useEffect(() => {
+    // Fetch review session data for the user (if any)
+    async function fetchReview() {
+      const userId = user?.id;
+      if (userId) {
+        const data = await getReviewSession(userId);
+        setReviewData(data);
+      }
+    }
+    fetchReview();
+  }, [user]);
+
+  const handleReviewSave = async (data: any) => {
+    const userId = user?.id;
+    if (userId) {
+      await saveReviewSession(userId, data);
+      setReviewData(data);
+    }
+  };
+  
+  // Fix ReviewModal props: add fallback type for reviewData
+  const reviewDataObj = (reviewData && typeof reviewData === 'object') ? reviewData as any : {};
+  
   if (userLoading || !user) {
     return <div className="flex justify-center py-10">Loading user...</div>;
   }
@@ -409,13 +436,22 @@ export default function NutritionPage() {
               <div>
                 <h3 className="text-lg font-medium">Daily Targets <span className="text-xs text-text-light">({targetNutrition.targetCalories} kcal / {targetNutrition.targetProtein}g P / {targetNutrition.targetCarbs}g C / {targetNutrition.targetFat}g F)</span></h3>
               </div>
-              <button
-                onClick={() => setIsPersonalizationOpen(true)}
-                disabled={savingTargets}
-                className="text-accent font-medium disabled:opacity-50"
-              >
-                {savingTargets ? 'Saving...' : 'Personalize'}
-              </button>
+              <div className="flex gap-4">
+                <button
+                  onClick={() => setIsPersonalizationOpen(true)}
+                  disabled={savingTargets}
+                  className="text-accent font-medium disabled:opacity-50"
+                >
+                  {savingTargets ? 'Saving...' : 'Personalize'}
+                </button>
+                <button
+                  onClick={() => setIsReviewOpen(true)}
+                  className="text-yellow-400 font-medium"
+                  style={{ minWidth: 'auto' }}
+                >
+                  Review
+                </button>
+              </div>
             </div>
             
             <div className="mb-4">
@@ -515,7 +551,7 @@ export default function NutritionPage() {
                     <div className="text-right">
                       <div className="font-medium">{meal.calories} cal</div>
                       <div className="text-text-light text-xs">
-                        P: {meal.protein.toFixed(0)}g · C: {meal.carbs.toFixed(0)}g · F: {meal.fat.toFixed(0)}g
+                        P: {(meal.protein ?? 0).toFixed(0)}g · C: {(meal.carbs ?? 0).toFixed(0)}g · F: {(meal.fat ?? 0).toFixed(0)}g
                       </div>
                     </div>
                   </div>
@@ -677,12 +713,22 @@ export default function NutritionPage() {
             name: editMealData.meal_type,
             description: editMealData.notes || '',
             calories: editMealData.calories,
-            protein: editMealData.protein ?? editMealData.protein_g ?? 0,
-            carbs: editMealData.carbs ?? editMealData.carbs_g ?? 0,
-            fat: editMealData.fats ?? editMealData.fat_g ?? 0,
+            protein: editMealData.protein_g ?? 0,
+            carbs: editMealData.carbs_g ?? 0,
+            fat: editMealData.fat_g ?? 0,
           }}
         />
       )}
+
+      <ReviewModal
+        isOpen={isReviewOpen}
+        onClose={() => setIsReviewOpen(false)}
+        initialCurrentWeight={reviewDataObj.currentWeight}
+        initialGoalWeight={reviewDataObj.goalWeight}
+        initialWeeks={reviewDataObj.weeks}
+        initialRows={reviewDataObj.rows}
+        onSave={handleReviewSave}
+      />
     </Layout>
   );
 } 

@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import Layout from '@/components/layout/Layout';
-import { getNutritionLogs, getNutritionTargets, getWaterIntake } from '@/lib/api';
+import { getNutritionLogs, getNutritionTargets, getWaterIntake, getReviewSession } from '@/lib/api';
 import { getCurrentUser, getUserProfile } from '@/lib/supabase';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 import { format, subDays, isAfter, isBefore, parseISO } from 'date-fns';
@@ -11,6 +11,8 @@ import 'react-date-range/dist/styles.css';
 import 'react-date-range/dist/theme/default.css';
 import { FaStar } from 'react-icons/fa';
 import { useNutritionData } from '@/lib/NutritionDataContext';
+import { LineChart, Line } from 'recharts';
+import { useAuth } from '@/lib/auth-context';
 
 export default function AnalyticsPage() {
   const [activeTab, setActiveTab] = useState('workout');
@@ -31,6 +33,9 @@ export default function AnalyticsPage() {
   });
   const [consistencyReport, setConsistencyReport] = useState<any[]>([]);
   const { nutritionDataVersion } = useNutritionData();
+  const [reviewRows, setReviewRows] = useState<any[]>([]);
+  const [reviewSummary, setReviewSummary] = useState('');
+  const { user, loading: userLoading } = useAuth();
   
   // Mock analytics data
   const workoutAnalytics = {
@@ -60,7 +65,8 @@ export default function AnalyticsPage() {
   };
 
   useEffect(() => {
-    if (activeTab !== 'nutrition') return;
+    if (userLoading || !user) return;
+    if (activeTab !== 'nutrition' && activeTab !== 'workout') return;
     let isMounted = true;
     async function fetchAnalytics() {
       setLoading(true);
@@ -72,6 +78,8 @@ export default function AnalyticsPage() {
           setPieData([]);
           setWaterForSelected({ actual: 0, target: 0 });
           setConsistencyReport([]);
+          setReviewRows([]);
+          setReviewSummary('No review data available.');
           setLoading(false);
           return;
         }
@@ -193,19 +201,37 @@ export default function AnalyticsPage() {
           }
         }
         setConsistencyReport(report);
+        // Fetch review data
+        const review = await getReviewSession(user.id);
+        if (review && review.rows && Array.isArray(review.rows)) {
+          setReviewRows(review.rows);
+          // Calculate summary: hit = actualWeight within 0.2kg of expectedWeight
+          let hit = 0, total = 0;
+          review.rows.forEach((row: any, idx: number) => {
+            if (idx === 0) return; // skip first row
+            if (row.actualWeight != null && Math.abs(row.actualWeight - row.expectedWeight) <= 0.2) hit++;
+            if (row.actualWeight != null) total++;
+          });
+          setReviewSummary(`You hit your target ${hit} out of ${total} times.`);
+        } else {
+          setReviewRows([]);
+          setReviewSummary('No review data available.');
+        }
       } catch (e) {
         setMacroBarData([]);
         setWaterBarData([]);
         setPieData([]);
         setWaterForSelected({ actual: 0, target: 0 });
         setConsistencyReport([]);
+        setReviewRows([]);
+        setReviewSummary('No review data available.');
       } finally {
         setLoading(false);
       }
     }
     fetchAnalytics();
     return () => { isMounted = false; };
-  }, [activeTab, fromDate, toDate, selectedDay, nutritionDataVersion]);
+  }, [activeTab, fromDate, toDate, selectedDay, nutritionDataVersion, userLoading, user]);
   
   useEffect(() => {
     async function fetchMinDate() {
@@ -230,6 +256,10 @@ export default function AnalyticsPage() {
   
   // Colors for pie
   const pieColors = ['#22d3ee', '#818cf8', '#facc15'];
+
+  if (userLoading || !user) {
+    return <div className="flex justify-center py-10">Loading user...</div>;
+  }
 
   return (
     <Layout title="ANALYTICS">
@@ -437,6 +467,21 @@ export default function AnalyticsPage() {
                 </div>
               </div>
             </div>
+          </div>
+          {/* Weight Progression Line Chart */}
+          <div className="card p-4">
+            <h3 className="text-lg font-bold mb-4 text-center">Weight Progression: Expected vs Actual</h3>
+            <ResponsiveContainer width="100%" height={300}>
+              <LineChart data={reviewRows} margin={{ top: 20, right: 30, left: 0, bottom: 5 }}>
+                <XAxis dataKey="date" />
+                <YAxis />
+                <Tooltip />
+                <Legend />
+                <Line type="monotone" dataKey="expectedWeight" stroke="#2563eb" name="Target (Expected)" strokeWidth={3} />
+                <Line type="monotone" dataKey="actualWeight" stroke="#ef4444" name="Actual" strokeWidth={3} />
+              </LineChart>
+            </ResponsiveContainer>
+            <div className="mt-4 text-center text-sm text-text-light">{reviewSummary}</div>
           </div>
           {/* Consistency Report (4th card) */}
           <div className="card p-4 mt-8">
