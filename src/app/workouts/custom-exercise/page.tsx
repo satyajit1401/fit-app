@@ -3,8 +3,8 @@
 import { useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Layout from '@/components/layout/Layout';
+import { addExerciseToWorkout } from '@/lib/api';
 import { supabase } from '@/lib/supabase';
-import { clearCache, CACHE_KEYS } from '@/lib/cache';
 
 export default function CustomExercisePage() {
   const router = useRouter();
@@ -33,7 +33,7 @@ export default function CustomExercisePage() {
     e.preventDefault();
     
     if (!name.trim()) {
-      setError('Please enter an exercise name');
+      setError('Exercise name is required.');
       return;
     }
     
@@ -41,70 +41,81 @@ export default function CustomExercisePage() {
     setError('');
     
     try {
-      // Create the custom exercise
-      const { data: exerciseData, error: exerciseError } = await supabase
+      // Insert the exercise using Supabase
+      const { data, error } = await supabase
         .from('exercises')
         .insert([
           {
-            name: name.trim(),
-            category,
-            equipment: equipment.trim() || null,
-            description: description.trim() || null,
+            name,
+            description,
+            category: category || 'Other',
+            equipment_required: equipment ? [equipment] : [],
             is_custom: true
           }
         ])
-        .select()
-        .single();
+        .select();
       
-      if (exerciseError) throw exerciseError;
-      
-      // If a workout ID was provided, add this exercise to the workout
-      if (workoutId) {
-        // Get the highest position in the workout
-        const { data: positionData } = await supabase
-          .from('workout_exercises')
-          .select('position')
-          .eq('workout_id', workoutId)
-          .order('position', { ascending: false })
-          .limit(1);
-        
-        const position = (positionData?.[0]?.position || 0) + 1;
-        
-        // Add the exercise to the workout
-        const { error: workoutExerciseError } = await supabase
-          .from('workout_exercises')
-          .insert([
-            {
-              workout_id: workoutId,
-              exercise_id: exerciseData.id,
-              position,
-              sets: 3,
-              reps: 10
-            }
-          ]);
-          
-        if (workoutExerciseError) throw workoutExerciseError;
-        
-        // Clear the workout exercises cache
-        clearCache(`${CACHE_KEYS.WORKOUT_EXERCISES}${workoutId}`);
+      if (error) {
+        console.error('Error creating exercise:', error);
+        setError('Failed to create exercise. Please try again.');
+        return;
       }
       
-      // Navigate back to the workout or exercises page
-      if (workoutId) {
-        router.push(`/workouts/${workoutId}`);
-      } else {
-        router.push('/workouts/exercises');
+      console.log('Exercise created successfully:', data);
+      
+      // If we have a workoutId, we need to add this exercise to the workout
+      if (workoutId && data && data.length > 0) {
+        // Get current highest position
+        const response = await fetch(`/api/workouts/${workoutId}/highest-position`);
+        const positionData = await response.json();
+        const position = positionData.position + 1;
+        
+        // Add exercise to workout
+        const success = await addExerciseToWorkout({
+          workout_id: workoutId,
+          exercise_id: data[0].id,
+          position,
+          sets: 3,
+          reps: 10
+        });
+        
+        if (!success) {
+          console.error('Error adding exercise to workout');
+          setError('Exercise created but could not add to workout.');
+          return;
+        }
       }
+      
+      // Navigate back
+      router.push(workoutId ? `/workouts/${workoutId}` : '/workouts');
     } catch (err) {
-      console.error('Error creating exercise:', err);
-      setError('Failed to create exercise. Please try again.');
+      console.error('Error creating custom exercise:', err);
+      setError('An unexpected error occurred. Please try again.');
+    } finally {
       setIsLoading(false);
     }
   };
   
+  const bottomActions = (
+    <div className="fixed bottom-0 left-0 w-full p-4 bg-background border-t border-gray-800 shadow-lg">
+      <button
+        type="submit"
+        form="custom-exercise-form"
+        className="btn-primary w-full py-4 rounded-full text-base font-medium bg-gradient-to-b from-[#45D67B] to-[#2DCB6C] text-white shadow-lg"
+        disabled={isLoading}
+      >
+        {isLoading ? 'CREATING...' : 'CREATE & ADD EXERCISE'}
+      </button>
+    </div>
+  );
+  
   return (
-    <Layout title="CREATE CUSTOM EXERCISE" backUrl={workoutId ? `/workouts/exercises?workoutId=${workoutId}` : '/workouts/exercises'}>
-      <form onSubmit={handleSubmit} className="flex flex-col h-full">
+    <Layout 
+      title="CREATE CUSTOM EXERCISE" 
+      backUrl={workoutId ? `/workouts/exercises?workoutId=${workoutId}` : '/workouts/exercises'}
+      bottomElement={bottomActions}
+    >
+      <form id="custom-exercise-form" onSubmit={handleSubmit} className="flex flex-col h-full mb-24">
         <div className="flex-1 space-y-6">
           <div>
             <label className="block text-text-light mb-2" htmlFor="exercise-name">
@@ -167,16 +178,6 @@ export default function CustomExercisePage() {
           {error && (
             <p className="text-red-500">{error}</p>
           )}
-        </div>
-        
-        <div className="mt-6">
-          <button
-            type="submit"
-            className="btn-primary w-full"
-            disabled={isLoading}
-          >
-            {isLoading ? 'CREATING...' : 'CREATE EXERCISE'}
-          </button>
         </div>
       </form>
     </Layout>

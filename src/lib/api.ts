@@ -1,5 +1,4 @@
 import { supabase } from './supabase';
-import { getFromCache, saveToCache, CACHE_KEYS } from './cache';
 
 // Workout types
 export interface Workout {
@@ -9,16 +8,25 @@ export interface Workout {
   difficulty?: string;
   created_at?: string;
   user_id?: string;
+  type?: string;
+  estimated_duration?: number;
+  is_public?: boolean;
+  equipment_needed?: string[];
+  tags?: string[];
+  thumbnail_url?: string;
 }
 
 export interface Exercise {
   id: string;
   name: string;
-  category: string;
+  category?: string;
   description?: string;
-  equipment?: string;
+  equipment_required?: string[];
   instructions?: string;
   image_url?: string;
+  muscle_group?: string;
+  difficulty?: string;
+  video_url?: string;
 }
 
 export interface WorkoutExercise {
@@ -29,7 +37,10 @@ export interface WorkoutExercise {
   reps: number;
   weight?: number;
   rest_time?: number;
+  position?: number;
+  isPending?: boolean;
   exercise?: Exercise;
+  sets_data?: string;
 }
 
 export interface Progress {
@@ -45,7 +56,7 @@ export interface NutritionLog {
   id: string;
   user_id: string;
   meal_type: string;
-  food_items?: any; // jsonb
+  food_items?: any;
   calories: number;
   protein_g?: number;
   carbs_g?: number;
@@ -82,12 +93,6 @@ export interface PaginationOptions {
 // Workout APIs
 export const getWorkouts = async (options?: PaginationOptions): Promise<Workout[]> => {
   try {
-    // Try to get from cache first
-    const cachedData = getFromCache<Workout[]>(CACHE_KEYS.WORKOUTS);
-    if (cachedData && !options) {
-      return cachedData;
-    }
-    
     let query = supabase
       .from('workouts')
       .select('*')
@@ -107,11 +112,6 @@ export const getWorkouts = async (options?: PaginationOptions): Promise<Workout[
       return [];
     }
     
-    // Only cache if no pagination is used
-    if (data && !options) {
-      saveToCache(CACHE_KEYS.WORKOUTS, data);
-    }
-    
     return data || [];
   } catch (error) {
     console.error('Unexpected error in getWorkouts:', error);
@@ -126,13 +126,6 @@ export const getWorkoutById = async (id: string): Promise<Workout | null> => {
       return null;
     }
     
-    // Try to get from cache first
-    const cacheKey = `${CACHE_KEYS.WORKOUT}${id}`;
-    const cachedData = getFromCache<Workout>(cacheKey);
-    if (cachedData) {
-      return cachedData;
-    }
-    
     const { data, error } = await supabase
       .from('workouts')
       .select('*')
@@ -142,11 +135,6 @@ export const getWorkoutById = async (id: string): Promise<Workout | null> => {
     if (error) {
       console.error('Error fetching workout:', error);
       return null;
-    }
-    
-    // Save to cache
-    if (data) {
-      saveToCache(cacheKey, data);
     }
     
     return data;
@@ -163,21 +151,23 @@ export const getWorkoutExercises = async (workoutId: string): Promise<WorkoutExe
       return [];
     }
     
-    // Direct query with no cache dependency for better immediacy
+    console.log('Fetching workout exercises for ID:', workoutId);
+    
     const { data, error } = await supabase
       .from('workout_exercises')
       .select(`
         *,
-        exercise:exercise_id (*)
+        exercise:exercises(*)
       `)
       .eq('workout_id', workoutId)
-      .order('id');
+      .order('position');
     
     if (error) {
       console.error('Error fetching workout exercises:', error);
       return [];
     }
     
+    console.log(`Received ${data?.length || 0} exercises`);
     return data || [];
   } catch (error) {
     console.error('Unexpected error in getWorkoutExercises:', error);
@@ -188,12 +178,6 @@ export const getWorkoutExercises = async (workoutId: string): Promise<WorkoutExe
 // Get all exercises
 export const getExercises = async (): Promise<Exercise[]> => {
   try {
-    // Try to get from cache first
-    const cachedData = getFromCache<Exercise[]>(CACHE_KEYS.EXERCISES);
-    if (cachedData) {
-      return cachedData;
-    }
-    
     const { data, error } = await supabase
       .from('exercises')
       .select('*')
@@ -204,15 +188,65 @@ export const getExercises = async (): Promise<Exercise[]> => {
       return [];
     }
     
-    // Save to cache
-    if (data) {
-      saveToCache(CACHE_KEYS.EXERCISES, data);
-    }
-    
     return data || [];
   } catch (error) {
     console.error('Unexpected error in getExercises:', error);
     return [];
+  }
+};
+
+// Add a new exercise to a workout
+export const addExerciseToWorkout = async (workoutExercise: {
+  workout_id: string;
+  exercise_id: string;
+  position: number;
+  sets: number;
+  reps: number;
+  weight?: number;
+}): Promise<boolean> => {
+  try {
+    const { data, error } = await supabase
+      .from('workout_exercises')
+      .insert([workoutExercise])
+      .select();
+    
+    if (error) {
+      console.error('Error adding exercise to workout:', error);
+      return false;
+    }
+    
+    return true;
+  } catch (error) {
+    console.error('Unexpected error in addExerciseToWorkout:', error);
+    return false;
+  }
+};
+
+// Update workout exercise
+export const updateWorkoutExercise = async (
+  id: string,
+  updates: {
+    sets?: number;
+    reps?: number;
+    weight?: number;
+    position?: number;
+  }
+): Promise<boolean> => {
+  try {
+    const { error } = await supabase
+      .from('workout_exercises')
+      .update(updates)
+      .eq('id', id);
+    
+    if (error) {
+      console.error('Error updating workout exercise:', error);
+      return false;
+    }
+    
+    return true;
+  } catch (error) {
+    console.error('Unexpected error in updateWorkoutExercise:', error);
+    return false;
   }
 };
 
@@ -239,7 +273,6 @@ export const getProgress = async (): Promise<Progress[]> => {
 // Nutrition APIs
 export const getNutritionLogs = async (date?: string, includeDeleted: boolean = false): Promise<NutritionLog[]> => {
   try {
-    // Get current user
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) {
       console.error('No user found when fetching nutrition logs');
@@ -287,63 +320,83 @@ export const ensureAuthenticated = async (): Promise<string | null> => {
   }
 };
 
+// Consolidated API call for workout details and exercises
+export const getWorkoutWithExercises = async (workoutId: string): Promise<{workout: Workout | null, exercises: WorkoutExercise[]}> => {
+  try {
+    if (!workoutId) {
+      console.error('Missing workout ID');
+      return { workout: null, exercises: [] };
+    }
+    
+    // First, get the workout
+    const { data: workout, error: workoutError } = await supabase
+      .from('workouts')
+      .select('*')
+      .eq('id', workoutId)
+      .single();
+    
+    if (workoutError) {
+      console.error('Error fetching workout:', workoutError);
+      return { workout: null, exercises: [] };
+    }
+    
+    // Then get exercises in the same function
+    const { data: exercises, error: exercisesError } = await supabase
+      .from('workout_exercises')
+      .select(`
+        *,
+        exercise:exercises(*)
+      `)
+      .eq('workout_id', workoutId)
+      .order('position');
+    
+    if (exercisesError) {
+      console.error('Error fetching workout exercises:', exercisesError);
+      return { workout, exercises: [] };
+    }
+    
+    return { 
+      workout, 
+      exercises: exercises || [] 
+    };
+  } catch (error) {
+    console.error('Error in getWorkoutWithExercises:', error);
+    return { workout: null, exercises: [] };
+  }
+};
+
+// Optimized version of getNutritionTargets
 export async function getNutritionTargets(userId: string, date?: string): Promise<NutritionTargets | null> {
   try {
     const queryDate = date || new Date().toISOString().split('T')[0];
-    console.log('Getting nutrition targets for date:', queryDate);
     
-    // First try to get exact date match
-    const { data: exactMatch, error: exactError } = await supabase
-      .from('nutrition_targets')
-      .select('*')
-      .eq('user_id', userId)
-      .eq('start_date', queryDate)
-      .single();
-
-    if (exactMatch) {
-      console.log('Found exact match for date:', exactMatch);
-      return {
-        targetCalories: exactMatch.target_calories,
-        targetProtein: exactMatch.target_protein,
-        targetCarbs: exactMatch.target_carbs,
-        targetFat: exactMatch.target_fat,
-        targetWater: exactMatch.target_water,
-        weeklyWeightTargets: exactMatch.weekly_weight_targets || [],
-      };
-    }
-
-    // If no exact match, get the most recent target before the query date
+    // Single query with proper ordering and filtering
     const { data, error } = await supabase
       .from('nutrition_targets')
       .select('*')
       .eq('user_id', userId)
-      .lt('start_date', queryDate)
+      .lte('start_date', queryDate)
       .order('start_date', { ascending: false })
       .limit(1)
       .single();
 
     if (error) {
       if (error.code === 'PGRST116') { // No rows returned
-        console.log('No targets found for date:', queryDate);
         return null;
       }
       throw error;
     }
 
-    if (data) {
-      console.log('Found previous target:', data);
-      return {
-        targetCalories: data.target_calories,
-        targetProtein: data.target_protein,
-        targetCarbs: data.target_carbs,
-        targetFat: data.target_fat,
-        targetWater: data.target_water,
-        weeklyWeightTargets: data.weekly_weight_targets || [],
-      };
-    }
-
-    console.log('No targets found');
-    return null;
+    if (!data) return null;
+    
+    return {
+      targetCalories: data.target_calories,
+      targetProtein: data.target_protein,
+      targetCarbs: data.target_carbs,
+      targetFat: data.target_fat,
+      targetWater: data.target_water,
+      weeklyWeightTargets: data.weekly_weight_targets || [],
+    };
   } catch (error) {
     console.error('Error fetching nutrition targets:', error);
     return null;
@@ -353,38 +406,7 @@ export async function getNutritionTargets(userId: string, date?: string): Promis
 export async function updateNutritionTargets(targets: NutritionTargets, userId: string, date?: string): Promise<boolean> {
   try {
     const targetDate = date || new Date().toISOString().split('T')[0];
-    const today = new Date().toISOString().split('T')[0];
-
-    // For today and future dates, delete all future targets and upsert the new one
-    if (targetDate >= today) {
-      // Delete all future targets
-      const { data: futureTargets, error: fetchError } = await supabase
-        .from('nutrition_targets')
-        .select('id, start_date')
-        .eq('user_id', userId)
-        .gte('start_date', targetDate)
-        .order('start_date', { ascending: true });
-
-      if (fetchError) {
-        console.error('Error fetching future targets:', fetchError);
-        throw fetchError;
-      }
-
-      if (futureTargets && futureTargets.length > 0) {
-        const { error: deleteError } = await supabase
-          .from('nutrition_targets')
-          .delete()
-          .eq('user_id', userId)
-          .gte('start_date', targetDate);
-
-        if (deleteError) {
-          console.error('Error deleting future targets:', deleteError);
-          throw deleteError;
-        }
-      }
-    }
-
-    // Always upsert for the current target date
+    
     const { error } = await supabase
       .from('nutrition_targets')
       .upsert({
@@ -431,19 +453,7 @@ export async function saveMealToBackend(meal: {
     const validMealTypes = ['Breakfast', 'Lunch', 'Dinner', 'Snack', 'Pre-workout', 'Post-workout'];
     const mealType = validMealTypes.includes(meal.meal_type) ? meal.meal_type : 'Snack';
     
-    console.log('Saving meal (before insert):', {
-      user_id: meal.user_id,
-      meal_type: mealType,
-      calories: meal.calories,
-      protein_g: meal.protein,
-      carbs_g: meal.carbs,
-      fat_g: meal.fat,
-      meal_date: today,
-      meal_time: now,
-      notes: meal.description,
-    });
-    
-    const { data, error } = await supabase.from('nutrition_log').insert([
+    const { error } = await supabase.from('nutrition_log').insert([
       {
         user_id: meal.user_id,
         meal_type: mealType,
@@ -455,18 +465,16 @@ export async function saveMealToBackend(meal: {
         meal_time: now,
         notes: meal.description,
       },
-    ]).select();
+    ]);
     
-    console.log('Insert result:', { data, error });
     if (error) {
-      console.error('Error saving meal (after insert):', error);
+      console.error('Error saving meal:', error);
       throw error;
     }
     
-    console.log('Successfully saved meal:', data);
     return true;
   } catch (error) {
-    console.error('Error in saveMealToBackend (outer catch):', error);
+    console.error('Error in saveMealToBackend:', error);
     return false;
   }
 }
@@ -583,21 +591,6 @@ export async function updateWaterIntake(userId: string, date: string, amount: nu
   }
 }
 
-// Registration function (example)
-export async function registerUserAfterConfirmation(user: { id: string, email: string, full_name: string, username?: string }) {
-  // Call the backend function to insert user metadata only after email is confirmed
-  const { data, error } = await supabase.rpc('register_user', {
-    p_id: user.id,
-    p_email: user.email,
-    p_full_name: user.full_name,
-    p_username: user.username || null
-  });
-  if (error) {
-    throw error;
-  }
-  return data;
-}
-
 // Soft delete a meal (set is_deleted=true)
 export async function softDeleteMeal(mealId: string): Promise<boolean> {
   try {
@@ -613,25 +606,142 @@ export async function softDeleteMeal(mealId: string): Promise<boolean> {
   }
 }
 
-// Add review session API helpers
-export async function saveReviewSession(userId: string, data: any) {
-  // Upsert review session for the user
-  const { error } = await supabase
-    .from('review_sessions')
-    .upsert({
-      user_id: userId,
-      data,
-      updated_at: new Date().toISOString(),
-    }, { onConflict: 'user_id' });
-  if (error) throw error;
-}
+// Add batched version of adding exercises
+export const addExercisesToWorkoutBatch = async (workoutId: string, exerciseIds: string[]): Promise<boolean> => {
+  try {
+    if (!workoutId || !exerciseIds.length) {
+      return false;
+    }
+    
+    // Get the highest position value for proper ordering
+    const { data: positionData, error: positionError } = await supabase
+      .from('workout_exercises')
+      .select('position')
+      .eq('workout_id', workoutId)
+      .order('position', { ascending: false })
+      .limit(1);
+    
+    if (positionError) {
+      console.error('Error getting highest position:', positionError);
+      return false;
+    }
+    
+    const highestPosition = positionData.length > 0 ? positionData[0].position : 0;
+    
+    // Prepare exercises to insert
+    const exercisesToInsert = exerciseIds.map((exerciseId, index) => ({
+      workout_id: workoutId,
+      exercise_id: exerciseId,
+      position: highestPosition + index + 1,
+      sets: 3,
+      reps: 10
+    }));
+    
+    // Batch insert all exercises
+    const { error: insertError } = await supabase
+      .from('workout_exercises')
+      .insert(exercisesToInsert);
+    
+    if (insertError) {
+      console.error('Error batch inserting exercises:', insertError);
+      return false;
+    }
+    
+    return true;
+  } catch (error) {
+    console.error('Error in addExercisesToWorkoutBatch:', error);
+    return false;
+  }
+};
 
-export async function getReviewSession(userId: string) {
-  const { data, error } = await supabase
-    .from('review_sessions')
-    .select('data')
-    .eq('user_id', userId)
-    .single();
-  if (error) return null;
-  return data?.data || null;
-}
+// Get all exercises with filtering options
+export const getExercisesFiltered = async (filters?: { 
+  category?: string; 
+  searchTerm?: string;
+  limit?: number;
+}): Promise<Exercise[]> => {
+  try {
+    let query = supabase
+      .from('exercises')
+      .select('*');
+    
+    // Apply filters if provided
+    if (filters?.category) {
+      query = query.eq('category', filters.category);
+    }
+    
+    if (filters?.searchTerm) {
+      query = query.ilike('name', `%${filters.searchTerm}%`);
+    }
+    
+    if (filters?.limit) {
+      query = query.limit(filters.limit);
+    }
+    
+    const { data, error } = await query.order('name');
+    
+    if (error) {
+      console.error('Error fetching exercises:', error);
+      return [];
+    }
+    
+    return data || [];
+  } catch (error) {
+    console.error('Unexpected error in getExercisesFiltered:', error);
+    return [];
+  }
+};
+
+// Add batched version of updating exercises
+export const updateWorkoutExercisesBatch = async (updates: Array<{
+  id: string;
+  sets: number;
+  reps: number;
+  weight: number;
+  sets_data?: string;
+}>): Promise<boolean> => {
+  try {
+    if (!updates.length) {
+      console.log('No updates to process');
+      return true; // Nothing to update
+    }
+    
+    console.log('Processing batch updates for exercises:', updates);
+    
+    // Process updates in batches to avoid hitting request size limits
+    const batchSize = 10;
+    for (let i = 0; i < updates.length; i += batchSize) {
+      const batch = updates.slice(i, i + batchSize);
+      console.log(`Processing batch ${i/batchSize + 1}:`, batch);
+      
+      // Create a transaction for each batch
+      for (const update of batch) {
+        console.log(`Updating exercise ID ${update.id} with sets=${update.sets}, reps=${update.reps}, weight=${update.weight}`);
+        
+        const { data, error } = await supabase
+          .from('workout_exercises')
+          .update({
+            sets: update.sets,
+            reps: update.reps,
+            weight: update.weight,
+            sets_data: update.sets_data
+          })
+          .eq('id', update.id)
+          .select();
+        
+        if (error) {
+          console.error(`Error updating exercise ID ${update.id}:`, error);
+          return false;
+        }
+        
+        console.log(`Successfully updated exercise ID ${update.id}:`, data);
+      }
+    }
+    
+    console.log('All exercise updates completed successfully');
+    return true;
+  } catch (error) {
+    console.error('Error in updateWorkoutExercisesBatch:', error);
+    return false;
+  }
+};

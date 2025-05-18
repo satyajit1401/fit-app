@@ -5,15 +5,18 @@ import { useRouter } from 'next/navigation';
 import Layout from '@/components/layout/Layout';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/lib/auth-context';
-import { clearCache, CACHE_KEYS } from '@/lib/cache';
 
 export default function CreateWorkoutPage() {
-  const [name, setName] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState('');
   const router = useRouter();
   const { user } = useAuth();
-
+  
+  const [name, setName] = useState('');
+  const [description, setDescription] = useState('');
+  const [type, setType] = useState('Custom');
+  const [difficulty, setDifficulty] = useState('Intermediate');
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState('');
+  
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
@@ -23,7 +26,7 @@ export default function CreateWorkoutPage() {
     }
     
     if (!user) {
-      setError('You need to be logged in to create a workout');
+      setError('You must be logged in to create a workout');
       return;
     }
     
@@ -31,30 +34,38 @@ export default function CreateWorkoutPage() {
     setError('');
     
     try {
-      // Create a new workout in the database
-      const { data, error: supabaseError } = await supabase
+      // Create the workout using Supabase
+      const { data, error } = await supabase
         .from('workouts')
         .insert([
-          { 
+          {
             name: name.trim(),
-            user_id: user.id,
-            description: '',
-            is_public: true
+            description: description.trim() || null,
+            type: type || 'Custom',
+            difficulty: difficulty || 'Intermediate',
+            user_id: user.id
           }
         ])
-        .select()
-        .single();
+        .select();
       
-      if (supabaseError) throw supabaseError;
+      if (error) {
+        console.error('Error creating workout:', error);
+        setError('Failed to create workout. Please try again.');
+        return;
+      }
       
-      // Clear the workouts cache to ensure fresh data is loaded
-      clearCache(CACHE_KEYS.WORKOUTS);
+      console.log('Workout created successfully:', data);
       
-      // Redirect to the new workout page
-      router.push(`/workouts/${data.id}`);
+      // Navigate to the new workout
+      if (data && data.length > 0) {
+        router.push(`/workouts/${data[0].id}`);
+      } else {
+        router.push('/workouts');
+      }
     } catch (err) {
       console.error('Error creating workout:', err);
-      setError('Failed to create workout. Please try again.');
+      setError('An unexpected error occurred. Please try again.');
+    } finally {
       setIsLoading(false);
     }
   };

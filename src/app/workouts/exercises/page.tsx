@@ -4,16 +4,7 @@ import { useState, useEffect } from 'react';
 import Layout from '@/components/layout/Layout';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { supabase } from '@/lib/supabase';
-import { clearCache, CACHE_KEYS } from '@/lib/cache';
-
-interface Exercise {
-  id: string;
-  name: string;
-  equipment?: string;
-  category: string;
-  description?: string;
-}
+import { getExercisesFiltered, addExercisesToWorkoutBatch, Exercise } from '@/lib/api';
 
 export default function ExercisesPage() {
   const router = useRouter();
@@ -29,12 +20,10 @@ export default function ExercisesPage() {
     const fetchExercises = async () => {
       setLoading(true);
       try {
-        const { data, error } = await supabase
-          .from('exercises')
-          .select('*')
-          .order('name');
-          
-        if (error) throw error;
+        // Use our optimized function
+        const data = await getExercisesFiltered({
+          searchTerm: searchQuery || undefined
+        });
         setExercises(data || []);
       } catch (error) {
         console.error('Error fetching exercises:', error);
@@ -44,11 +33,14 @@ export default function ExercisesPage() {
     };
     
     fetchExercises();
-  }, []);
+  }, [searchQuery]);
   
-  const filteredExercises = exercises.filter(exercise => 
-    exercise.name.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  // Filter already handled by API if searchQuery is provided
+  const filteredExercises = searchQuery 
+    ? exercises 
+    : exercises.filter(exercise => 
+        exercise.name.toLowerCase().includes(searchQuery.toLowerCase())
+      );
   
   // Group exercises by category
   const groupedExercises: Record<string, Exercise[]> = {};
@@ -73,17 +65,25 @@ export default function ExercisesPage() {
     if (!workoutId || selectedExercises.length === 0) return;
     
     try {
-      // Get the highest position value for the current workout
-      const { data: positionData } = await supabase
-        .from('workout_exercises')
-        .select('position')
-        .eq('workout_id', workoutId)
-        .order('position', { ascending: false })
-        .limit(1);
+      setLoading(true);
       
-      const highestPosition = positionData?.[0]?.position || 0;
+      // Option 1: Use our new batch function for direct API optimization
+      if (selectedExercises.length > 0) {
+        const success = await addExercisesToWorkoutBatch(workoutId, selectedExercises);
+        
+        if (success) {
+          // If successful direct insert, just navigate back
+          router.push(`/workouts/${workoutId}`);
+          return;
+        }
+      }
       
-      // Prepare data for insertion
+      // Option 2: Fall back to session storage approach if batch insert fails
+      // Prepare data for insertion (store in session storage temporarily)
+      // This is for backward compatibility
+      const { data: positionData } = await fetch(`/api/workouts/${workoutId}/highest-position`).then(res => res.json());
+      const highestPosition = positionData?.position || 0;
+      
       const exercisesToInsert = selectedExercises.map((exerciseId, index) => ({
         workout_id: workoutId,
         exercise_id: exerciseId,
@@ -92,20 +92,18 @@ export default function ExercisesPage() {
         reps: 10
       }));
       
-      // Insert the exercises
-      const { error } = await supabase
-        .from('workout_exercises')
-        .insert(exercisesToInsert);
+      // Store the exercises to add in session storage to be retrieved when navigating back
+      sessionStorage.setItem('pendingExercises', JSON.stringify({
+        workoutId,
+        exercises: exercisesToInsert
+      }));
       
-      if (error) throw error;
-      
-      // Clear cache
-      clearCache(`${CACHE_KEYS.WORKOUT_EXERCISES}${workoutId}`);
-      
-      // Navigate back to the workout page
+      // Navigate back to the workout page - will handle the actual API call after saving
       router.push(`/workouts/${workoutId}`);
+      
     } catch (error) {
       console.error('Error adding exercises:', error);
+      setLoading(false);
     }
   };
   
@@ -114,13 +112,15 @@ export default function ExercisesPage() {
   };
   
   const bottomActions = (
-    <div className="fixed bottom-0 left-0 w-full p-4 bg-background">
+    <div className="fixed bottom-0 left-0 w-full p-4 bg-background border-t border-gray-800 shadow-lg">
       <button 
-        className="btn-primary w-full py-3 rounded-full text-base"
+        className="btn-primary w-full py-4 rounded-full text-base font-medium bg-gradient-to-b from-[#45D67B] to-[#2DCB6C] text-white shadow-lg"
         onClick={handleAddExercises}
         disabled={selectedExercises.length === 0}
       >
-        ADD {selectedExercises.length > 0 ? `(${selectedExercises.length})` : ''}
+        {selectedExercises.length > 0 
+          ? `ADD SELECTED EXERCISES (${selectedExercises.length})` 
+          : 'SELECT EXERCISES TO ADD'}
       </button>
     </div>
   );
@@ -163,36 +163,50 @@ export default function ExercisesPage() {
           </div>
         </div>
       ) : (
-        <div className="space-y-2 mb-24">
-          {Object.keys(groupedExercises).sort().map(category => (
-            <div key={category}>
-              <h2 className="text-base font-bold mb-1">{category}</h2>
-              <div className="space-y-1">
-                {groupedExercises[category].map(exercise => (
-                  <div 
-                    key={exercise.id}
-                    className={`card flex items-center justify-between px-3 py-2 rounded-lg min-h-[44px] ${selectedExercises.includes(exercise.id) ? 'border-2 border-accent' : ''}`}
-                    onClick={() => handleToggleSelect(exercise.id)}
-                  >
-                    <div className="flex items-center">
-                      <div className="w-8 h-8 bg-gray-600 rounded-md flex items-center justify-center mr-3 text-base font-bold">
-                        {exercise.name.substring(0, 1)}
-                      </div>
-                      <span className="text-base">{exercise.name}</span>
-                    </div>
-                    {selectedExercises.includes(exercise.id) && (
-                      <div className="w-6 h-6 rounded-full bg-accent flex items-center justify-center text-white">
-                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-4 h-4">
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
-                        </svg>
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
+        <>
+          {selectedExercises.length > 0 && (
+            <div className="sticky top-4 z-10 mx-auto bg-accent text-white py-2 px-4 rounded-full w-fit shadow-lg flex items-center gap-2 mb-4">
+              <span className="text-sm font-medium">{selectedExercises.length} exercise{selectedExercises.length !== 1 ? 's' : ''} selected</span>
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-4 h-4">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+              </svg>
             </div>
-          ))}
-        </div>
+          )}
+          <div className="space-y-2 mb-32">
+            {Object.keys(groupedExercises).sort().map(category => (
+              <div key={category}>
+                <h2 className="text-base font-bold mb-1">{category}</h2>
+                <div className="space-y-1">
+                  {groupedExercises[category].map(exercise => (
+                    <div 
+                      key={exercise.id}
+                      className={`card flex items-center justify-between px-3 py-2 rounded-lg min-h-[44px] ${
+                        selectedExercises.includes(exercise.id) 
+                          ? 'border-2 border-accent bg-accent bg-opacity-10' 
+                          : 'border border-gray-700'
+                      }`}
+                      onClick={() => handleToggleSelect(exercise.id)}
+                    >
+                      <div className="flex items-center">
+                        <div className="w-8 h-8 bg-gray-600 rounded-md flex items-center justify-center mr-3 text-base font-bold">
+                          {exercise.name.substring(0, 1)}
+                        </div>
+                        <span className="text-base">{exercise.name}</span>
+                      </div>
+                      {selectedExercises.includes(exercise.id) && (
+                        <div className="w-6 h-6 rounded-full bg-accent flex items-center justify-center text-white">
+                          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-4 h-4">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                          </svg>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        </>
       )}
     </Layout>
   );

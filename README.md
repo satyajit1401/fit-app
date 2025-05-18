@@ -69,70 +69,71 @@ The setup script includes some sample exercise data to get you started. You can 
 
 # FitMaxxer 9000 - Fitness Tracking App
 
-This project is a fitness tracking application built with Next.js and Supabase.
+A comprehensive fitness tracking application built with Next.js and Supabase, focused on workout tracking, nutrition logging, and fitness progress analytics.
 
-## Setup Instructions
+## Features
 
-### Database Setup
+- **Workout Management**: Create, view, and execute custom workouts
+- **Exercise Library**: Extensive database of exercises with descriptions
+- **Nutrition Tracking**: Log meals and monitor nutritional intake
+- **Progress Analytics**: Track fitness metrics over time
+- **User Authentication**: Secure login and user-specific data
 
-1. Log in to the [Supabase Dashboard](https://app.supabase.com) and select your project.
-2. Go to the SQL Editor in the left sidebar.
-3. Run the following SQL scripts in order:
-   - `sql/auth_setup_fix.sql` (creates authentication tables and functions)
-   - `sql/add_test_user.sql` (creates a test user with sample data)
+## Tech Stack
 
-### Environment Variables
+- **Frontend**: Next.js, React, TypeScript, Tailwind CSS
+- **Backend**: Supabase (PostgreSQL)
+- **API**: REST API with direct Supabase queries
 
-Make sure your `.env` file has the following variables:
+## Getting Started
 
-```
-# Supabase configuration
-SUPABASE_URL=your-supabase-url
-SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
-SUPABASE_ANON_KEY=your-anon-key
-SUPABASE_DB_PASSWORD=your-db-password
-SUPABASE_ACCESS_TOKEN=your-access-token
+### Prerequisites
 
-# For Next.js compatibility
-NEXT_PUBLIC_SUPABASE_URL=your-supabase-url
-NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
-```
+- Node.js 18+
+- npm or yarn
+- Supabase account
 
-### Running the App
+### Installation
 
-1. Install dependencies:
+1. Clone the repository:
+   ```bash
+   git clone <repository-url>
+   cd fit-app
+   ```
+
+2. Install dependencies:
    ```bash
    npm install
    ```
 
-2. Run the development server:
+3. Create a `.env.local` file with your Supabase credentials:
+   ```
+   NEXT_PUBLIC_SUPABASE_URL=your-supabase-url
+   NEXT_PUBLIC_SUPABASE_ANON_KEY=your-supabase-anon-key
+   ```
+
+4. Set up the Supabase database:
+   - Run the SQL scripts in the `sql/` directory through the Supabase dashboard
+
+5. Start the development server:
    ```bash
    npm run dev
    ```
 
-3. Open [http://localhost:3000](http://localhost:3000) in your browser.
+6. Open [http://localhost:3000](http://localhost:3000) in your browser
 
-## Test User
+## Project Structure
 
-A test user is created with the following credentials:
+- `src/app`: Next.js app router structure
+- `src/components`: Reusable React components
+- `src/lib`: Utility functions, API calls, and context providers
+- `sql/`: SQL scripts for database setup
 
-- Email: satyajit.kumthekar@gmail.com
-- Password: password123
+## Documentation
 
-This user has sample data for workouts, progress tracking, and nutrition logs.
+- [API Documentation](API_DOCUMENTATION.md): Details about the app's API endpoints
+- [Cleanup Summary](CLEANUP_SUMMARY.md): Summary of recent codebase cleanup
 
-## Features
+## License
 
-- User authentication with Supabase
-- Workout tracking
-- Nutrition logging
-- Progress tracking
-- Fitness analytics
-
-## Technologies Used
-
-- Next.js
-- React
-- TypeScript
-- Supabase (PostgreSQL)
-- Tailwind CSS 
+MIT 
